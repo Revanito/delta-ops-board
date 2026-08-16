@@ -1,0 +1,5 @@
+requests==2.32.3
+beautifulsoup4==4.12.3
+schedule==1.2.2
+pytz==2024.2
+tzdata==2024.2

@@ -1,0 +1,18 @@
+services:
+  delta-notifier:
+    build: .
+    container_name: delta-notifier
+    restart: unless-stopped
+    command: python main.py
+    env_file: .env
+    volumes:
+      - ./data:/data
+
+  delta-site:
+    build: .
+    container_name: delta-site
+    restart: unless-stopped
+    command: python webgen.py
+    env_file: .env
+    volumes:
+      - ./site-repo:/repo
