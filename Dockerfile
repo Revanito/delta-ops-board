@@ -8,8 +8,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py webgen.py sources.py ./
+COPY webgen.py sources.py ./
 
-VOLUME ["/data"]
-
-CMD ["python", "main.py"]
+CMD ["python", "webgen.py"]
