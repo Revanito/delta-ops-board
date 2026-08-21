@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delta Force · Warfare</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+:root {
+  --bg: #eef0f2;
+  --bg-wash: #e4e7ea;
+  --card: #ffffff;
+  --text: #12151a;
+  --text-dim: #5b6470;
+  --border: #d8dce1;
+  --accent: #d9600a;
+  --accent-ink: #ffffff;
+  --live: #d0271f;
+  --lose: #a7adb6;
+  --win-box: #1a9c53;
+  --win-ink: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0f12; --bg-wash: #15181c; --card: #15181c; --text: #eceef0;
+    --text-dim: #838d97; --border: #262b31; --accent: #ff8c3a; --accent-ink: #16110a;
+    --live: #ff453a; --lose: #5c636b; --win-box: #2fd673; --win-ink: #0a1f12;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0f12; --bg-wash: #15181c; --card: #15181c; --text: #eceef0;
+  --text-dim: #838d97; --border: #262b31; --accent: #ff8c3a; --accent-ink: #16110a;
+  --live: #ff453a; --lose: #5c636b; --win-box: #2fd673; --win-ink: #0a1f12;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0; padding: 0 1rem 4rem; background: var(--bg); color: var(--text);
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.layout { max-width: 980px; margin: 0 auto; padding: 0 0.5rem; }
+main { min-width: 0; }
+.site-nav {
+  max-width: 980px; margin: 0 auto; padding: 1.1rem 0.5rem 0;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
+}
+.site-nav-title {
+  font: 800 1rem/1 "Segoe UI", -apple-system, "Arial Narrow", sans-serif;
+  font-stretch: condensed; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.site-nav-links { display: flex; gap: 0.4rem; }
+.nav-link {
+  text-decoration: none; color: var(--text-dim); font-weight: 700; font-size: 0.82rem;
+  padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid var(--border);
+}
+.nav-link.active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.nav-link:not(.active):hover { border-color: var(--accent); color: var(--accent); }
+header {
+  padding: 1.75rem 0 1.75rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2rem;
+}
+.eyebrow {
+  font: 700 0.72rem/1 -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-transform: uppercase; letter-spacing: 0.14em; color: var(--accent); margin: 0 0 0.6rem;
+}
+h1 {
+  font: 800 1.9rem/1.1 "Segoe UI", -apple-system, Roboto, "Arial Narrow", sans-serif;
+  font-stretch: condensed; text-transform: uppercase; letter-spacing: 0.01em;
+  margin: 0 0 0.4rem; text-wrap: balance;
+}
+.subtitle { color: var(--text-dim); font-size: 0.92rem; margin: 0; }
+h2 {
+  font: 700 0.78rem/1 -apple-system, "Segoe UI", sans-serif;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim);
+  margin: 0 0 0.85rem; display: flex; align-items: center; gap: 0.5rem;
+}
+h3.rise-subhead {
+  font: 700 0.72rem/1 -apple-system, "Segoe UI", sans-serif;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim);
+  margin: 1.5rem 0 0.85rem;
+}
+section { margin-bottom: 2.25rem; }
+.section-live h2 { color: var(--live); }
+.ticket-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 0.6rem; align-items: start; }
+.section-completed .ticket-list, .section-rise .ticket-list { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.ticket {
+  background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--border);
+  border-radius: 4px; padding: 0.85rem 1rem; position: relative;
+}
+.ticket-live { border-left-color: var(--live); padding-top: 2.1rem; }
+.ticket-completed, .ticket-lobby { opacity: 0.92; }
+.ticket-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 0.6rem; }
+.team-line { display: inline-flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.team-line.team-a { justify-content: flex-end; }
+.team-line.team-b { justify-content: flex-start; }
+.flag { width: 20px; height: 14px; object-fit: cover; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px var(--border); }
+.team-logo { width: 34px; height: 34px; object-fit: contain; border-radius: 6px; flex: none; background: var(--bg-wash); padding: 4px; }
+.team {
+  font: 700 1.15rem/1.25 "Segoe UI", -apple-system, "Arial Narrow", sans-serif;
+  font-stretch: condensed; letter-spacing: 0.01em; min-width: 0; overflow-wrap: break-word;
+}
+a.team { color: inherit; text-decoration: none; }
+a.team:hover { color: var(--accent); text-decoration: underline; }
+.vs { color: var(--text-dim); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.score {
+  display: flex; align-items: center; gap: 0.3rem; justify-content: center;
+  font: 700 1.2rem/1 ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.score .dash { color: var(--text-dim); font-weight: 400; }
+.score .digit { color: var(--lose); min-width: 1.5ch; text-align: center; padding: 0.08rem 0; }
+.score .digit.winner { color: var(--win-ink); background: var(--win-box); border-radius: 4px; padding: 0.08rem 0.4rem; }
+.ticket-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+  margin-top: 0.55rem; font-size: 0.78rem; color: var(--text-dim);
+}
+.dot-sep { opacity: 0.6; }
+.when { font-variant-numeric: tabular-nums; }
+.twitch-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+.twitch-link:hover { text-decoration: underline; }
+.result-link { color: var(--text-dim); text-decoration: none; font-weight: 600; }
+.result-link:hover { color: var(--accent); text-decoration: underline; }
+.badge {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 0.35rem;
+  font: 700 0.68rem/1 -apple-system, sans-serif; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 0.25rem 0.55rem; border-radius: 999px;
+}
+.badge-live { background: var(--live); color: #fff; position: absolute; top: 0.7rem; right: 0.85rem; margin-left: 0; }
+.badge-live .dot { width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .badge-live .dot { animation: none; } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.badge-done { background: var(--bg-wash); color: var(--text-dim); border: 1px solid var(--border); }
+.badge-drops { background: var(--accent); color: var(--accent-ink); }
+.ticket-row-broadcast { display: block; }
+.broadcast-title {
+  font: 700 0.98rem/1.3 "Segoe UI", -apple-system, "Arial Narrow", sans-serif;
+  font-stretch: condensed; letter-spacing: 0.01em;
+}
+.lobby-title {
+  font: 700 0.95rem/1.3 "Segoe UI", -apple-system, "Arial Narrow", sans-serif;
+  font-stretch: condensed; letter-spacing: 0.01em;
+}
+.lobby-places { margin-top: 0.4rem; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
+.lobby-place { font-weight: 600; }
+.lobby-more, .empty-inline { color: var(--text-dim); }
+.section-rise h2 { color: var(--accent); }
+.rise-grid { display: grid; grid-template-columns: 1fr 260px; gap: 1.25rem; align-items: start; }
+@media (max-width: 700px) { .rise-grid { grid-template-columns: 1fr; } }
+.standings-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.standings-table th, .standings-table td { padding: 0.5rem 0.7rem; text-align: left; font-size: 0.85rem; }
+.standings-table thead th {
+  font: 700 0.68rem/1 -apple-system, sans-serif; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-dim); background: var(--bg-wash); border-bottom: 1px solid var(--border);
+}
+.standings-table tbody tr + tr { border-top: 1px solid var(--border); }
+.standings-rank { font-variant-numeric: tabular-nums; color: var(--text-dim); width: 2ch; }
+.standings-team { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+.team-logo-sm { width: 22px; height: 22px; object-fit: contain; border-radius: 5px; background: var(--bg-wash); padding: 2px; flex: none; }
+.standings-points { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right; }
+.side-panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.1rem; }
+.side-panel h3 {
+  font: 700 0.72rem/1 -apple-system, "Segoe UI", sans-serif; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-dim); margin: 0 0 0.75rem;
+}
+.mvp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+.mvp-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; }
+.mvp-avatar { width: 26px; height: 26px; object-fit: cover; border-radius: 50%; background: var(--bg-wash); flex: none; }
+.mvp-name { font-weight: 700; }
+.mvp-team { color: var(--text-dim); }
+.mvp-count { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
+.section-rewards h2 { color: var(--accent); }
+.rewards-campaign { text-align: center; color: var(--text-dim); font-size: 0.82rem; margin: -0.4rem 0 0.85rem; }
+.rewards-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.6rem; }
+.reward-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.75rem; display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 0.35rem; width: 150px;
+}
+.reward-img { width: 64px; height: 64px; object-fit: contain; border-radius: 6px; background: var(--bg-wash); padding: 0.3rem; }
+.reward-name { font: 700 0.82rem/1.25 "Segoe UI", -apple-system, sans-serif; }
+.reward-time { font: 700 0.7rem/1 -apple-system, sans-serif; color: var(--accent); text-transform: uppercase; letter-spacing: 0.03em; }
+.reward-campaign { font-size: 0.7rem; color: var(--text-dim); }
+.empty { color: var(--text-dim); font-size: 0.88rem; padding: 1rem; border: 1px dashed var(--border); border-radius: 4px; background: var(--bg-wash); }
+footer {
+  margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+  color: var(--text-dim); font-size: 0.76rem; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+}
+a { color: inherit; }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <span class="site-nav-title">Delta Ops Board</span>
+  <div class="site-nav-links">
+    <a class="nav-link active" href="index.html">Warfare</a>
+    <a class="nav-link" href="operations.html">Operations</a>
+  </div>
+</nav>
+<div class="layout">
+<main>
+  <header>
+    <p class="eyebrow">Ops Board</p>
+    <h1>Delta Force · Warfare</h1>
+    <p class="subtitle">Live status, upcoming matches and recent results for the Warfare track (traditional team-vs-team format), pulled from Liquipedia.</p>
+  </header>
+  
+    <section class="section-rewards">
+      <h2>Active drops</h2>
+      <p class="rewards-campaign">SEASON MELTDOWN WEEKENDS · 21 Aug 2026 – 24 Aug 2026</p>
+      <div class="rewards-grid">
+    <article class="reward-card">
+      <img class="reward-img" src="https://static-cdn.jtvnw.net/twitch-quests-assets/REWARD/a41e8820-c75d-4c38-b4b7-761f5d1322d4.png" alt="Ops Challenge Supply Pack" loading="lazy">
+      <div class="reward-name">Ops Challenge Supply Pack</div>
+      <div class="reward-time">Watch 15m</div>
+      <div class="reward-campaign"></div>
+    </article>
+    <article class="reward-card">
+      <img class="reward-img" src="https://static-cdn.jtvnw.net/twitch-quests-assets/REWARD/ec9c3cd5-13e7-4c40-acb3-154fbb4743d1.png" alt="2x Merit Card (1 Match)" loading="lazy">
+      <div class="reward-name">2x Merit Card (1 Match)</div>
+      <div class="reward-time">Watch 30m</div>
+      <div class="reward-campaign"></div>
+    </article>
+    <article class="reward-card">
+      <img class="reward-img" src="https://static-cdn.jtvnw.net/twitch-quests-assets/REWARD/be306812-a686-4acb-aaf8-c8a4201b2370.png" alt="Standard Gear Ticket" loading="lazy">
+      <div class="reward-name">Standard Gear Ticket</div>
+      <div class="reward-time">Watch 1h</div>
+      <div class="reward-campaign"></div>
+    </article>
+    <article class="reward-card">
+      <img class="reward-img" src="https://static-cdn.jtvnw.net/twitch-quests-assets/REWARD/d15f86e1-763e-4379-8818-dfe5356c0b76.png" alt="C Card - C Graffiti" loading="lazy">
+      <div class="reward-name">C Card - C Graffiti</div>
+      <div class="reward-time">Watch 1h 30m</div>
+      <div class="reward-campaign"></div>
+    </article></div>
+    </section>
+    <section class="section-upcoming">
+      <h2>Upcoming (next 30 days)</h2>
+      <div class="ticket-list"><p class="empty">No further matches scheduled in this window.</p></div>
+    </section>
+    <section class="section-completed">
+      <h2>Results</h2>
+      <div class="ticket-list">
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Long Teng</span></span>
+        <span class="score"><span class="digit winner">3</span><span class="dash">–</span><span class="digit">1</span></span>
+        <span class="team-line team-b"><span class="team">Team HAN</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Sun 21 Jun, 10:00 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Rex Regum Qeon</span></span>
+        <span class="score"><span class="digit">1</span><span class="dash">–</span><span class="digit winner">2</span></span>
+        <span class="team-line team-b"><span class="team">Team HAN</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Sat 20 Jun, 12:45 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Long Teng</span></span>
+        <span class="score"><span class="digit winner">2</span><span class="dash">–</span><span class="digit">1</span></span>
+        <span class="team-line team-b"><span class="team">Rex Regum Qeon</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Sat 20 Jun, 10:00 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Team HAN</span></span>
+        <span class="score"><span class="digit winner">2</span><span class="dash">–</span><span class="digit">0</span></span>
+        <span class="team-line team-b"><span class="team">Toxido Esports</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Fri 19 Jun, 10:30 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Fluxo W7M</span></span>
+        <span class="score"><span class="digit">0</span><span class="dash">–</span><span class="digit winner">2</span></span>
+        <span class="team-line team-b"><span class="team">Toxido Esports</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Fri 19 Jun, 08:50 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">HYDRANGEA</span></span>
+        <span class="score"><span class="digit">0</span><span class="dash">–</span><span class="digit winner">2</span></span>
+        <span class="team-line team-b"><span class="team">Team HAN</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Fri 19 Jun, 07:00 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">HYDRANGEA</span></span>
+        <span class="score"><span class="digit">0</span><span class="dash">–</span><span class="digit winner">2</span></span>
+        <span class="team-line team-b"><span class="team">Rex Regum Qeon</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Thu 18 Jun, 12:00 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Long Teng</span></span>
+        <span class="score"><span class="digit winner">2</span><span class="dash">–</span><span class="digit">0</span></span>
+        <span class="team-line team-b"><span class="team">Fluxo W7M</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Thu 18 Jun, 10:00 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Hostile Response ACE</span></span>
+        <span class="score"><span class="digit">0</span><span class="dash">–</span><span class="digit winner">2</span></span>
+        <span class="team-line team-b"><span class="team">Toxido Esports</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Thu 18 Jun, 09:30 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Team HAN</span></span>
+        <span class="score"><span class="digit winner">2</span><span class="dash">–</span><span class="digit">0</span></span>
+        <span class="team-line team-b"><span class="team">Reborn</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Thu 18 Jun, 07:00 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Toxido Esports</span></span>
+        <span class="score"><span class="digit">1</span><span class="dash">–</span><span class="digit winner">2</span></span>
+        <span class="team-line team-b"><span class="team">Rex Regum Qeon</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Wed 17 Jun, 16:30 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">HYDRANGEA</span></span>
+        <span class="score"><span class="digit winner">2</span><span class="dash">–</span><span class="digit">0</span></span>
+        <span class="team-line team-b"><span class="team">Hostile Response ACE</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Wed 17 Jun, 14:30 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Fluxo W7M</span></span>
+        <span class="score"><span class="digit winner">2</span><span class="dash">–</span><span class="digit">1</span></span>
+        <span class="team-line team-b"><span class="team">Reborn</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Wed 17 Jun, 09:30 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article>
+    <article class="ticket ticket-completed">
+      <div class="ticket-row">
+        <span class="team-line team-a"><span class="team">Long Teng</span></span>
+        <span class="score"><span class="digit winner">2</span><span class="dash">–</span><span class="digit">0</span></span>
+        <span class="team-line team-b"><span class="team">Team HAN</span></span>
+      </div>
+      <div class="ticket-meta">
+        <span class="tournament">Delta Force Invitational 2026 · Warfare</span>
+        <span class="dot-sep">·</span>
+        <span class="when">Wed 17 Jun, 07:00 Paris</span>
+        
+        <span class="badge badge-done">Final</span>
+        
+      </div>
+    </article></div>
+    </section>
+  <footer>
+    <span>Updated Fri 21 Aug 2026, 17:08 (Paris time)</span>
+    <span>Sources: Liquipedia, twitchdrops.app, playdeltaforce.com (drops calendar)</span>
+  </footer>
+</main>
+</div>
+</body>
+</html>
