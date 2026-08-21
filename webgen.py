@@ -386,8 +386,14 @@ body {
   margin: 0; padding: 0 1rem 4rem; background: var(--bg); color: var(--text);
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
-.layout { max-width: 980px; margin: 0 auto; padding: 0 0.5rem; }
+.layout {
+  max-width: 1300px; margin: 0 auto; padding: 0 0.5rem;
+  display: grid; grid-template-columns: 1fr 340px; gap: 2rem; align-items: start;
+}
+.layout.no-sidebar { grid-template-columns: 1fr; max-width: 980px; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
 main { min-width: 0; }
+.sidebar { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1.75rem; min-width: 0; }
 .site-nav {
   max-width: 980px; margin: 0 auto; padding: 1.1rem 0.5rem 0;
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
@@ -493,8 +499,7 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .lobby-place { font-weight: 600; }
 .lobby-more, .empty-inline { color: var(--text-dim); }
 .section-rise h2 { color: var(--accent); }
-.rise-grid { display: grid; grid-template-columns: 1fr 260px; gap: 1.25rem; align-items: start; }
-@media (max-width: 700px) { .rise-grid { grid-template-columns: 1fr; } }
+.rise-grid { display: flex; flex-direction: column; gap: 1rem; }
 .standings-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .standings-table th, .standings-table td { padding: 0.5rem 0.7rem; text-align: left; font-size: 0.85rem; }
 .standings-table thead th {
@@ -552,8 +557,10 @@ def render_nav(active):
 </nav>"""
 
 
-def build_page(active, title, eyebrow, subtitle, sections, sources_line, generated_at):
+def build_page(active, title, eyebrow, subtitle, sections, sources_line, generated_at, sidebar_html=None):
     generated_str = generated_at.astimezone(LOCAL_TZ).strftime("%a %d %b %Y, %H:%M (Paris time)")
+    layout_class = "layout" if sidebar_html else "layout no-sidebar"
+    sidebar = f'<aside class="sidebar">{sidebar_html}</aside>' if sidebar_html else ""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -565,7 +572,7 @@ def build_page(active, title, eyebrow, subtitle, sections, sources_line, generat
 </head>
 <body>
 {render_nav(active)}
-<div class="layout">
+<div class="{layout_class}">
 <main>
   <header>
     <p class="eyebrow">{e(eyebrow)}</p>
@@ -578,6 +585,7 @@ def build_page(active, title, eyebrow, subtitle, sections, sources_line, generat
     <span>Sources: {e(sources_line)}</span>
   </footer>
 </main>
+{sidebar}
 </div>
 </body>
 </html>
@@ -663,13 +671,17 @@ def build_operations_html(matches, rise_data_by_region, generated_at, rewards=No
         scene_rows, "completed",
         "No recent results.",
     )
-    for region_key, region_label in RISE_REGIONS:
-        sections += render_rise_series_section(region_label, rise_data_by_region.get(region_key))
+
+    sidebar_html = "".join(
+        render_rise_series_section(region_label, rise_data_by_region.get(region_key))
+        for region_key, region_label in RISE_REGIONS
+    )
 
     return build_page(
         "operations", "Delta Force · Operations", "Ops Board",
         "RISE Series standings and scene-wide results for the Operations track (extraction-shooter, lobby/points format), pulled from Liquipedia and TiMi's own RISE Series backend.",
         sections, "Liquipedia, playdeltaforce.com (RISE Series + drops calendar), twitchdrops.app", generated_at,
+        sidebar_html=sidebar_html,
     )
 
 
