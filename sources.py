@@ -1,39 +1,69 @@
-"""Shared fetch/parse logic for both the Discord notifier and the website generator.
+"""Shared fetch/parse logic for the delta-ops-board website generator.
 
-Two public data sources, merged and de-duplicated:
-- Ubisoft's official esports page (accurate, but only covers whatever event
-  Ubisoft is currently spotlighting on that page)
-- Liquipedia's site-wide match ticker (broader coverage, occasionally lags
-  on team reveals for not-yet-started bracket slots)
+Two data sources, covering different halves of the scene:
+- Liquipedia's deltaforce wiki: a site-wide match ticker plus the tournament
+  portal (tier/prize-pool/results context). Delta Force's competitive scene
+  runs two parallel tracks by game mode - "Warfare" (traditional team mode,
+  best-of-N elimination brackets, e.g. Delta Force Invitational Warfare) and
+  "Operations" (extraction-shooter mode, lobby/points standings, e.g. RISE
+  Series, Pro League) - and Liquipedia covers both, tagged by a name-based
+  heuristic (see `_infer_mode`) since the match ticker doesn't expose the
+  distinction structurally.
+- TiMi's own api-dfgw.timi-es.com backend: undocumented but public/no-auth,
+  confirmed live behind playdeltaforce.com's RISE Series page. Gives the
+  authoritative standings/schedule/roster data for whichever Operations
+  tournaments actually run on it (confirmed: RISE Series EMEA + Americas;
+  don't assume other Operations events use this backend without checking -
+  a season_id has to be found via `fetch_season_config` or discovered on
+  playdeltaforce.com first). This is an undocumented third-party backend,
+  not a stable public API, and could change shape or disappear without
+  notice - re-verify field names if these calls start failing.
+
+Unlike r6-notifier, there's no Ubisoft-equivalent official schedule page and
+no siege.gg-equivalent third-party stats site for Delta Force (checked
+deltaforceesports.com - a near-empty community-qualifier SPA with no public
+API - and escharts.com - a generic multi-game wrapper, not a source of
+truth). So Liquipedia is the only match-ticker source: no secondary feed to
+cross-check "live" status or backfill flags/logos/bracket links against.
+Country flags/team logos for Warfare-track teams aren't available from
+either source yet - a future improvement, not solved here.
 """
-import json
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
 
 import requests
 from bs4 import BeautifulSoup
 
-log = logging.getLogger("r6-notifier.sources")
+log = logging.getLogger("delta-ops-board.sources")
 
-LIQUIPEDIA_API = "https://liquipedia.net/rainbowsix/api.php"
-LIQUIPEDIA_UA = "r6-notifier/1.0 (personal notification bot; contact via github.com/Revanito/r6-notifier)"
+LIQUIPEDIA_API = "https://liquipedia.net/deltaforce/api.php"
+LIQUIPEDIA_UA = "delta-ops-board/1.0 (personal site generator; contact via github.com/Revanito/delta-ops-board)"
 
-UBISOFT_URL = "https://www.ubisoft.com/en-us/esports/rainbow-six/siege"
-UBISOFT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-NEXT_DATA_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
+DFGW_API = "https://api-dfgw.timi-es.com/df"
+DFGW_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-DROPS_URL = "https://twitchdrops.app/game/tom-clancys-rainbow-six-siege"
+# twitchdrops.app's URL slug is the game's full Twitch category name
+# ("Delta Force: Hawk Ops"), not just "delta-force" - the plain slug 301s
+# here. Same markup (drop-card/drop-name/drop-time/campaign-banner) as
+# r6-notifier's page, confirmed live.
+DROPS_URL = "https://twitchdrops.app/game/delta-force-hawk-ops"
+DROPS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 DROPS_CHANNEL_RE = re.compile(r"twitch\.tv/([^/?#\"]+)", re.I)
 
-SIEGE_GG_BASE = "https://siege.gg"
-SIEGE_GG_API = "https://siege.gg/api/stats/matches"
-NUXT_DATA_RE = re.compile(r'<script type="application/json"[^>]*id="__NUXT_DATA__"[^>]*>(.*?)</script>', re.S)
-TEAM_NAME_SUFFIXES = ("esports", "esport", "gaming", "clan", "team", "gg")
+# The game's own drops microsite (playdeltaforce.com/act/twitchdrops/) is a
+# JS SPA with no server-rendered content, but it just fetches this static
+# JSON straight off the same host - no auth, same-origin. Unlike
+# twitchdrops.app (whose `.drop-campaign` field came back blank on every
+# card checked so far), this carries the real campaign name and an exact
+# date range per campaign, plus the site's full drops history (49 entries
+# at last check) - useful for a future archive page, not just "what's
+# active now".
+DROPS_CALENDAR_URL = "https://www.playdeltaforce.com/act/twitchdrops/js/activitymaps.json"
 
-MATCH_DEDUP_BUCKET_SECONDS = 300  # matches within this window are treated as the same match across sources
+WARFARE_NAME_RE = re.compile(r"\bwarfare\b", re.I)
 
 
 def get_twitch_token(client_id, client_secret):
@@ -71,11 +101,14 @@ def fetch_twitch_live_info(client_id, client_secret, channels):
 
 
 def fetch_active_drops():
-    """Scrapes twitchdrops.app's public R6 Siege page for real drops-campaign
-    data: which channels are currently eligible for drops, and what the
-    rewards actually are. This site publishes a plain-text chatbot API
-    (twitchdrops.app/api/chatbot/...) built for public consumption, so
-    scraping its HTML for the same data is in the same spirit.
+    """Scrapes twitchdrops.app's public Delta Force page for real drops-
+    campaign data: which channels are currently eligible for drops, and
+    what the rewards actually are. Ported from r6-notifier - same site,
+    same markup, just a different game slug and (per a spot check) a much
+    shorter campaign/reward history since Delta Force is a newer title.
+    This site publishes a plain-text chatbot API (twitchdrops.app/api/
+    chatbot/...) built for public consumption, so scraping its HTML for the
+    same data is in the same spirit.
 
     Returns (rewards, active_channels):
     - rewards: currently-active rewards only (the page tags expired ones
@@ -84,7 +117,7 @@ def fetch_active_drops():
     - active_channels: lowercased set of channel logins eligible right now
       (campaign banners whose countdown hasn't ended yet)
     """
-    resp = requests.get(DROPS_URL, headers={"User-Agent": UBISOFT_UA}, timeout=20)
+    resp = requests.get(DROPS_URL, headers={"User-Agent": DROPS_UA}, timeout=20)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -119,361 +152,141 @@ def fetch_active_drops():
     return rewards, active_channels
 
 
-def _normalize_team_name(name):
-    """Loose key for matching the same team across sources that spell its
-    name slightly differently ("DarkZero" on Liquipedia vs "DarkZero
-    Esports" on siege.gg)."""
-    key = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
-    for suffix in TEAM_NAME_SUFFIXES:
-        if key.endswith(suffix) and len(key) > len(suffix) + 2:
-            key = key[: -len(suffix)]
-    return key
+def _parse_act_time_range(text):
+    """Parses the subset of activitymaps.json's `act_time` formats that
+    carry an explicit year into (start_ts, end_ts) UTC epoch seconds, at
+    day granularity (end_ts is the start of the day *after* the listed end
+    date, so a same-day check is an inclusive `start_ts <= now < end_ts`).
+    Two other formats seen in the archive - "M.D H:MM - H:MM UTC+N" and
+    "Mon D, H:MM - H:MM UTC+N" - never carry a year, so guessing one across
+    a multi-year archive would be unreliable; those return None and are
+    shown as raw text instead of being date-compared."""
+    text = (text or "").strip()
 
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+\d{1,2}:\d{2})?\s*-\s*(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+\d{1,2}:\d{2})?$", text)
+    if m:
+        sm, sd, sy, em, ed, ey = (int(g) for g in m.groups())
+        start = datetime(sy, sm, sd, tzinfo=timezone.utc)
+        end = datetime(ey, em, ed, tzinfo=timezone.utc) + timedelta(days=1)
+        return start.timestamp(), end.timestamp()
 
-def _siege_gg_winner_index(rosters, winner_id, score):
-    """winner_id straight from the API when present; siege.gg has been seen
-    to leave it null on an otherwise-decided match (e.g. round score tied
-    17-17 but maps_won 2-1), so fall back to comparing the map score."""
-    if winner_id:
-        for i, r in enumerate(rosters[:2]):
-            if r.get("id") == winner_id:
-                return i
-    if score and score[0] != score[1]:
-        return 0 if score[0] > score[1] else 1
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})\s+\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$", text)
+    if m:
+        sm, sd, sy = (int(g) for g in m.groups())
+        start = datetime(sy, sm, sd, tzinfo=timezone.utc)
+        return start.timestamp(), (start + timedelta(days=1)).timestamp()
+
     return None
 
 
-def fetch_siege_gg_matches(cutoff_ts, max_pages=5):
-    """siege.gg's public JSON API backing /matches. Each page response
-    carries the *entire* "upcoming" list plus one page of the "results"
-    list (paginated, newest first, ~9-10 days per page) - the "tab" query
-    param turns out to only affect the frontend's own display, not what the
-    API returns, so a single set of page fetches covers both. Paginates
-    backwards through results until older than cutoff_ts. Used for: per-team
-    country flags and logos (Ubisoft/Liquipedia expose neither), the
-    siege.gg match-page link, the per-map score (maps_won_a/b, e.g. "1-3")
-    as the authoritative result, and each match's competition_id (used to
-    look up its playoff bracket)."""
-    seen_ids = set()
-    matches = []
-
-    def _add(m):
-        if m.get("id") in seen_ids:
-            return
-        seen_ids.add(m.get("id"))
-        rosters = m.get("rosters") or []
-        if len(rosters) < 2:
-            return
-        score = (m["maps_won_a"], m["maps_won_b"]) if m.get("has_results") else None
-        ts = datetime.fromisoformat(m["date"].replace("Z", "+00:00")).timestamp() if m.get("date") else None
-        matches.append({
-            "timestamp": ts,
-            "teams": [r.get("name") for r in rosters[:2]],
-            "flags": [r.get("flag") for r in rosters[:2]],
-            "logos": [r.get("logo_url") for r in rosters[:2]],
-            "score": score,
-            "winner_index": _siege_gg_winner_index(rosters, m.get("winner_id"), score),
-            "result_url": (SIEGE_GG_BASE + m["web_url"]) if m.get("web_url") else None,
-            "competition_id": m.get("competition_id"),
-            "competition_name": m.get("competition_full_name") or m.get("competition_name"),
-        })
-
-    page = 1
-    while page <= max_pages:
-        resp = requests.get(
-            SIEGE_GG_API,
-            params={"page": page, "tab": "results"},
-            headers={"User-Agent": UBISOFT_UA, "Accept": "application/json"},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-
-        for m in payload.get("upcoming", {}).get("data") or []:
-            _add(m)
-
-        results = payload.get("results", {})
-        data = results.get("data") or []
-        if not data:
-            break
-
-        reached_cutoff = False
-        for m in data:
-            ts = datetime.fromisoformat(m["date"].replace("Z", "+00:00")).timestamp()
-            if ts < cutoff_ts:
-                reached_cutoff = True
-                continue
-            _add(m)
-
-        if reached_cutoff or not results.get("next_page_url"):
-            break
-        page += 1
-
-    return matches
-
-
-def build_siege_gg_data(lookback_days=16):
-    """Returns (flag_map, logo_map, by_pair):
-    - flag_map / logo_map: {normalized_team_name: image_url}
-    - by_pair: {frozenset(normalized_team_names): [siege_gg_match, ...]}
-    """
-    siege_matches = fetch_siege_gg_matches(cutoff_ts=time.time() - lookback_days * 86400)
-
-    flag_map = {}
-    logo_map = {}
-    by_pair = {}
-    for sm in siege_matches:
-        for team, flag, logo in zip(sm["teams"], sm["flags"], sm["logos"]):
-            if not team:
-                continue
-            key = _normalize_team_name(team)
-            if flag:
-                flag_map.setdefault(key, flag)
-            if logo:
-                logo_map.setdefault(key, logo)
-        key = frozenset(_normalize_team_name(t) for t in sm["teams"])
-        by_pair.setdefault(key, []).append(sm)
-
-    return flag_map, logo_map, by_pair
-
-
-def attach_siege_gg_data(matches, flag_map, logo_map, by_pair):
-    """Enriches already-merged matches in place with flags/logos for both
-    teams and, where a matching siege.gg match exists (paired by team
-    names, sanity-checked by timestamp proximity since siege.gg's kickoff
-    time can differ from Ubisoft/Liquipedia's by a few minutes), the
-    result-page link, authoritative per-map score, and competition_id."""
-    for m in matches:
-        m["flags"] = [flag_map.get(_normalize_team_name(t)) for t in m["teams"]]
-        m["logos"] = [logo_map.get(_normalize_team_name(t)) for t in m["teams"]]
-
-        key = frozenset(_normalize_team_name(t) for t in m["teams"])
-        candidates = by_pair.get(key)
-        if not candidates:
-            continue
-        sm = min(candidates, key=lambda c: abs((c["timestamp"] or 0) - m["timestamp"]))
-        if sm["timestamp"] is None or abs(sm["timestamp"] - m["timestamp"]) > 6 * 3600:
-            continue
-        m["result_url"] = sm.get("result_url")
-        m["competition_id"] = sm.get("competition_id")
-        m["competition_name"] = sm.get("competition_name")
-        if sm.get("score") and (m.get("finished") or m.get("live")):
-            m["score"] = sm["score"]
-            if sm.get("winner_index") is not None:
-                m["winner_index"] = sm["winner_index"]
-    return matches
-
-
-def fetch_competition_bracket(competition_id):
-    """Playoff-only matches for one competition, from siege.gg's
-    per-competition matches API (the same one its /competitions/<id> page
-    uses to render the bracket)."""
-    resp = requests.get(
-        f"{SIEGE_GG_BASE}/api/stats/competitions/{competition_id}/matches",
-        headers={"User-Agent": UBISOFT_UA, "Accept": "application/json"},
-        timeout=20,
-    )
+def fetch_drops_calendar():
+    """The official drops event calendar: every campaign's real name and
+    exact date range (see DROPS_CALENDAR_URL). Returns a list of
+    {name, date_range, start_ts, end_ts} in whatever order the source JSON
+    has them - start_ts/end_ts are None for the two ambiguous no-year
+    formats `_parse_act_time_range` won't guess at."""
+    resp = requests.get(DROPS_CALENDAR_URL, headers={"User-Agent": DROPS_UA}, timeout=20)
     resp.raise_for_status()
-    payload = resp.json()
-    all_matches = (payload.get("results") or []) + (payload.get("upcoming") or [])
+    data = resp.json()
 
-    bracket = []
-    for m in all_matches:
-        if not m.get("playoff"):
-            continue
-        rosters = m.get("rosters") or []
-        score = (m["maps_won_a"], m["maps_won_b"]) if m.get("has_results") else None
-        ts = datetime.fromisoformat(m["date"].replace("Z", "+00:00")).timestamp() if m.get("date") else None
-        bracket.append({
-            "teams": [r.get("name") for r in rosters[:2]],
-            "flags": [r.get("flag") for r in rosters[:2]],
-            "logos": [r.get("logo_url") for r in rosters[:2]],
-            "score": score,
-            "winner_index": _siege_gg_winner_index(rosters, m.get("winner_id"), score),
-            "round": m.get("round") or "TBD",
-            "sequence": m.get("sequence") or 0,
-            "timestamp": ts,
-            "result_url": (SIEGE_GG_BASE + m["web_url"]) if m.get("web_url") else None,
+    entries = []
+    for act in (data.get("activities") or {}).get("EN", {}).values():
+        date_range = act.get("act_time") or ""
+        parsed = _parse_act_time_range(date_range)
+        entries.append({
+            "name": act.get("act_name") or act.get("title1") or "",
+            "date_range": date_range,
+            "start_ts": parsed[0] if parsed else None,
+            "end_ts": parsed[1] if parsed else None,
         })
-    return bracket
+    return entries
 
 
-def _devalue_resolve(raw, idx, depth=0):
-    """Nuxt's SSR payload (__NUXT_DATA__) is a flat array where objects
-    reference each other by index (devalue format) instead of nesting
-    inline. Walks those references back into a normal dict/list."""
-    if depth > 25:
-        return None
-    v = raw[idx]
-    if isinstance(v, list):
-        if len(v) == 2 and isinstance(v[0], str) and v[0] in ("ShallowReactive", "Reactive", "Ref"):
-            return _devalue_resolve(raw, v[1], depth + 1)
-        return [_devalue_resolve(raw, x, depth + 1) if isinstance(x, int) else x for x in v]
-    if isinstance(v, dict):
-        return {k: (_devalue_resolve(raw, x, depth + 1) if isinstance(x, int) else x) for k, x in v.items()}
-    return v
-
-
-def fetch_competition_info(competition_id):
-    """Competition-level info (prize pool, region, venue, participating
-    teams, ...) scraped from a competition's siege.gg page - there's no
-    JSON API for this, only what's embedded in the page's Nuxt payload.
-    /competitions/<id> redirects to the full slugged URL regardless of
-    slug, so the numeric id alone is enough."""
-    resp = requests.get(
-        f"{SIEGE_GG_BASE}/competitions/{competition_id}",
-        headers={"User-Agent": UBISOFT_UA},
-        timeout=20,
-    )
-    resp.raise_for_status()
-    m = NUXT_DATA_RE.search(resp.text)
-    if not m:
-        return None
-    raw = json.loads(m.group(1))
-
-    info = None
-    for idx, item in enumerate(raw):
-        if isinstance(item, dict) and "prizepool" in item and "stats" in item:
-            info = _devalue_resolve(raw, idx)
-            break
-    if not info:
-        return None
-
-    teams = (info.get("stats") or {}).get("involved_teams") or []
-    return {
-        "name": info.get("name"),
-        "logo_url": info.get("logo_url"),
-        "date": info.get("date"),
-        "type": "Online" if info.get("online") else "LAN",
-        "region": info.get("region"),
-        "prizepool": info.get("prizepool"),
-        "location": info.get("full_location"),
-        "venue": info.get("venue"),
-        "flag": info.get("flag"),
-        "web_url": (SIEGE_GG_BASE + info["web_url"]) if info.get("web_url") else f"{SIEGE_GG_BASE}/competitions/{competition_id}",
-        "teams": [
-            {
-                "name": t.get("name"),
-                "logo_url": t.get("logo_url"),
-                "flag": t.get("flag"),
-                "web_url": (SIEGE_GG_BASE + t["web_url"]) if t.get("web_url") else None,
-            }
-            for t in teams
-        ],
-    }
-
-
-def fetch_active_competition_info(matches, now=None):
-    """Sidebar data for whichever tournament fetch_active_bracket would
-    also be showing, or None if none of the given matches carry a
-    competition_id."""
-    comp_id, _ = pick_active_competition(matches, now=now)
-    if not comp_id:
-        return None
-    return fetch_competition_info(comp_id)
-
-
-def pick_active_competition(matches, now=None):
-    """Which tournament's bracket is most relevant right now: a live
-    match's competition wins outright; otherwise whichever competition has
-    a match closest in time to now (soonest upcoming, or most recent
-    result if nothing's scheduled)."""
+def current_drops_campaigns(calendar, now=None):
+    """Entries from fetch_drops_calendar() whose parsed date range covers
+    `now`. Entries with an unparsed (no-year) date range never match here."""
     now = now if now is not None else time.time()
-    candidates = [m for m in matches if m.get("competition_id") and m.get("timestamp")]
-    if not candidates:
-        return None, None
-    live = [m for m in candidates if m.get("live")]
-    pool = live or candidates
-    best = min(pool, key=lambda m: abs(m["timestamp"] - now))
-    return best["competition_id"], best.get("competition_name") or best.get("tournament")
-
-
-def fetch_active_bracket(matches, now=None):
-    """Playoff bracket for whichever tournament is currently most relevant
-    among the given (already status/window-filtered) matches, or ([], None)
-    if none of them carry a competition_id or that competition has no
-    playoff-stage matches yet."""
-    comp_id, comp_name = pick_active_competition(matches, now=now)
-    if not comp_id:
-        return [], None
-    bracket = fetch_competition_bracket(comp_id)
-    if not bracket:
-        return [], None
-    return bracket, comp_name
+    return [c for c in calendar if c["start_ts"] is not None and c["start_ts"] <= now < c["end_ts"]]
 
 
 def _make_key(ts, teams):
     return f"{ts}|{teams[0]}|{teams[1]}"
 
 
-def fetch_ubisoft_matches():
-    """Official schedule/results for the currently-featured event. More
-    authoritative than Liquipedia but limited in breadth."""
-    resp = requests.get(UBISOFT_URL, headers={"User-Agent": UBISOFT_UA}, timeout=20)
-    resp.raise_for_status()
-    m = NEXT_DATA_RE.search(resp.text)
-    if not m:
-        return [], []
-    data = json.loads(m.group(1))
-    page_data = data["props"]["pageProps"]["pageData"]
-
-    matches = []
-    for match in page_data.get("matches", []):
-        if match.get("isTimeTBD"):
-            continue
-        ts = match["timestamp"]
-        teams = [match["team1"]["name"], match["team2"]["name"]]
-        is_live = bool(match.get("live"))
-        scores = match.get("scores") or {}
-        score = (scores.get("team1", 0), scores.get("team2", 0))
-        # NB: Ubisoft pre-populates "gameScores" with zeroed placeholder
-        # entries for every possible map before a match even starts (e.g. 5
-        # empty slots for a Bo5), so those can't be used as a "has a score"
-        # signal - only the top-level series score and a past start time can.
-        has_score = score != (0, 0)
-        finished = (not is_live) and has_score and ts <= time.time()
-
-        matches.append({
-            "timestamp": ts,
-            "teams": teams,
-            "tournament": match.get("competition", {}).get("name", "Unknown tournament"),
-            "twitch_channel": None,
-            "live": is_live,
-            "finished": finished,
-            "score": score if (finished or is_live) else None,
-            "key": _make_key(ts, teams),
-        })
-
-    live_channels = [c.lower() for c in page_data.get("liveChannels", [])]
-    return matches, live_channels
+WARFARE_SUFFIX_RE = re.compile(r"\s*\((?:Warfare|DF team)\)$", re.I)
 
 
-def fetch_liquipedia_html():
+def _clean_warfare_name(name):
+    """Liquipedia disambiguates an org's Warfare-mode roster from its
+    Operations-mode one with a literal "(Warfare)" (or "(DF team)")
+    suffix in the page title/aria-label - accurate, but redundant on a
+    page that's already Warfare-only, and long enough on some team names
+    (e.g. "Rex Regum Qeon (Warfare)") to overflow a match ticket. Only
+    call this where mode is already known to be "warfare"."""
+    return WARFARE_SUFFIX_RE.sub("", name)
+
+
+def _infer_mode(tournament_name):
+    """Liquipedia's match ticker doesn't carry a structured game-mode field,
+    only the tournament name - so this is a heuristic, not ground truth.
+    Only the Warfare track consistently says "Warfare" in its tournament
+    names (Delta Force Invitational Warfare, Pan-Pacific Warfare Cup, ...);
+    Operations-track tournaments either say "Operations" explicitly or
+    don't mention a mode at all (RISE Series, Pro League), so "Operations"
+    is the default rather than "unknown"."""
+    return "warfare" if WARFARE_NAME_RE.search(tournament_name or "") else "operations"
+
+
+def fetch_liquipedia_page_html(page):
     resp = requests.get(
         LIQUIPEDIA_API,
         headers={"User-Agent": LIQUIPEDIA_UA, "Accept-Encoding": "gzip"},
-        params={"action": "parse", "page": "Liquipedia:Matches", "format": "json", "prop": "text"},
+        params={"action": "parse", "page": page, "format": "json", "prop": "text"},
         timeout=20,
     )
     resp.raise_for_status()
     return resp.json()["parse"]["text"]["*"]
 
 
+def fetch_liquipedia_html():
+    return fetch_liquipedia_page_html("Liquipedia:Matches")
+
+
 def _extract_teams(match_div):
+    """2-team head-to-head markup (`.match-info-header-opponent`) - the
+    classic bracket-match template, used by the Warfare track when a
+    Warfare tournament has ticker entries."""
     return [
         re.sub(r"\s*\(page does not exist\)$", "", a.get("title", a.get_text(strip=True)))
         for a in match_div.select(".match-info-header-opponent .name a")
     ]
 
 
+def _extract_lobby_winner(match_div):
+    """Operations-track games render with an entirely different template
+    (`.match-info-headerbr*`, Liquipedia's battle-royale/lobby layout) -
+    no head-to-head opponent pair at all. The site-wide ticker only ever
+    surfaces one `.match-info-headerbr-positionrow` per finished game (1st
+    place / the winner) - full per-lobby standings aren't available from
+    this feed, only from `fetch_schedule_result` for tournaments that run
+    on api-dfgw. Upcoming lobby games carry no team info here at all."""
+    row = match_div.select_one(".match-info-headerbr-positionrow")
+    if not row:
+        return None
+    a = row.select_one(".block-team .name a")
+    if not a:
+        return None
+    return re.sub(r"\s*\(page does not exist\)$", "", a.get("title", a.get_text(strip=True)))
+
+
 def build_team_links(html):
     """Team name -> Liquipedia roster page URL, built from every team link
     on the page (broader than any single match, so a team seen once gets
-    linked everywhere it appears - Ubisoft-sourced matches included, since
-    they carry no such link of their own)."""
+    linked everywhere it appears). Covers both the head-to-head and lobby
+    match templates (see `_extract_teams` / `_extract_lobby_winner`)."""
     soup = BeautifulSoup(html, "html.parser")
     links = {}
-    for a in soup.select(".match-info-header-opponent .name a"):
+    for a in soup.select(".match-info-header-opponent .name a, .match-info-headerbr-opponent .name a"):
         raw_title = a.get("title", a.get_text(strip=True))
         if "(page does not exist)" in raw_title:
             continue  # red link - no real roster page to send people to
@@ -499,7 +312,20 @@ def _extract_twitch_channel(match_div):
 
 def parse_liquipedia_matches(html):
     """Returns all matches (upcoming, live, and recently completed) found
-    anywhere on the page, tagged with their live/finished status."""
+    anywhere on the page, tagged with their status and inferred game mode
+    (see `_infer_mode`). "live" is a best-effort read of Liquipedia's own
+    ticker state, not a confirmed feed - there's no second source to cross-
+    check it against here (unlike r6-notifier, which trusted only Ubisoft's
+    feed for this and used Liquipedia purely for breadth).
+
+    Two ticker templates are handled (see `_extract_teams` /
+    `_extract_lobby_winner`): head-to-head entries get a full `teams`
+    pair + score; lobby (Operations) entries only ever expose a winner in
+    this feed, so those come back as a single-team, scoreless "result"
+    (`format: "lobby_result"`) - real standings for those need
+    `fetch_schedule_result`. Upcoming lobby games carry no matchup info at
+    all in this feed and are dropped rather than shown as fake "TBD vs
+    TBD" cards."""
     soup = BeautifulSoup(html, "html.parser")
     matches = []
 
@@ -511,97 +337,178 @@ def parse_liquipedia_matches(html):
         ts = int(timer["data-timestamp"])
         finished = timer.get("data-finished") == "finished"
         is_past = ts <= time.time()
+        tournament = _extract_tournament(match_div)
+        mode = _infer_mode(tournament)
+
         teams = _extract_teams(match_div)
-        if len(teams) < 2:
-            teams = teams + ["TBD"] * (2 - len(teams))
+        if mode == "warfare":
+            teams = [_clean_warfare_name(t) for t in teams]
+        if len(teams) >= 2:
+            score = None
+            winner_idx = None
+            if finished or is_past:
+                score_spans = match_div.select(".match-info-header-scoreholder-score")
+                if len(score_spans) >= 2:
+                    score = (score_spans[0].get_text(strip=True), score_spans[1].get_text(strip=True))
+                opponents = match_div.select(".match-info-header-opponent")
+                for i, opp in enumerate(opponents[:2]):
+                    if "match-info-header-winner" in opp.get("class", []):
+                        winner_idx = i
 
-        score = None
-        winner_idx = None
-        if finished or is_past:
-            score_spans = match_div.select(".match-info-header-scoreholder-score")
-            if len(score_spans) >= 2:
-                score = (score_spans[0].get_text(strip=True), score_spans[1].get_text(strip=True))
-            opponents = match_div.select(".match-info-header-opponent")
-            for i, opp in enumerate(opponents[:2]):
-                if "match-info-header-winner" in opp.get("class", []):
-                    winner_idx = i
+            live = False
+            if not finished and is_past:
+                # Past but never flagged "finished": could mean live right
+                # now, or a stale ticker entry for a match that already
+                # ended with no score posted. If a score exists, treat it
+                # as a result; if the start time was recent, treat it as
+                # tentatively live; otherwise too ambiguous to show.
+                if score and any(s.strip() for s in score):
+                    finished = True
+                elif (time.time() - ts) < 3 * 3600:
+                    live = True
+                else:
+                    continue
 
-        if not finished and is_past:
-            # Past but never flagged "finished": Liquipedia's live/ticker state
-            # can't be trusted to mean "live right now" (it also shows stale
-            # entries from matches that already ended). If a score got
-            # posted, treat it as a result; otherwise it's too ambiguous to
-            # show at all rather than risk a false "LIVE" claim.
-            if score and any(s.strip() for s in score):
-                finished = True
-            else:
-                continue
+            matches.append({
+                "format": "head_to_head",
+                "timestamp": ts,
+                "teams": teams,
+                "tournament": tournament,
+                "mode": mode,
+                "twitch_channel": _extract_twitch_channel(match_div),
+                "live": live,
+                "finished": finished,
+                "score": score,
+                "winner_index": winner_idx,
+                "key": _make_key(ts, teams),
+            })
+            continue
+
+        winner = _extract_lobby_winner(match_div)
+        if not winner:
+            continue  # upcoming lobby game - no matchup info in this feed
 
         matches.append({
+            "format": "lobby_result",
             "timestamp": ts,
-            "teams": teams,
-            "tournament": _extract_tournament(match_div),
+            "teams": [winner],
+            "tournament": tournament,
+            "mode": "operations",
             "twitch_channel": _extract_twitch_channel(match_div),
-            "live": False,  # only Ubisoft's feed is trusted for "live right now"
-            "finished": finished,
-            "score": score,
-            "winner_index": winner_idx,
-            "key": _make_key(ts, teams),
+            "live": False,
+            "finished": True,
+            "score": None,
+            "winner_index": 0,
+            "key": f"{ts}|{winner}",
         })
 
     return matches
 
 
-def _bucket(ts):
-    return round(ts / MATCH_DEDUP_BUCKET_SECONDS)
+# Liquipedia's global match ticker (Liquipedia:Matches) almost never carries
+# Warfare-track entries - it's dominated by the higher-frequency Operations
+# groups/qualifiers - so a Warfare tournament's own page has to be checked
+# directly for its bracket. There's no Ubisoft-style "here's the currently
+# active event" feed to derive this from automatically (see module
+# docstring), so this list is maintained by hand: (Liquipedia page title,
+# display name). Update it when a new Warfare LAN/qualifier bracket goes up
+# - check https://liquipedia.net/deltaforce/Portal:Tournaments for the
+# current S/A-tier Warfare entries and their page titles.
+BRACKET_PAGES = [
+    ("Delta Force Invitational/Warfare/2026", "Delta Force Invitational 2026 · Warfare"),
+]
 
 
-def _merge(primary, secondary, drop_tbd=True):
-    """Primary source wins on overlap, but backfills fields it lacks (e.g.
-    Ubisoft never exposes a twitch_channel) from the matching secondary
-    entry instead of just discarding it. Secondary entries with no bucket
-    match in primary are appended as-is."""
-    primary_by_bucket = {_bucket(m["timestamp"]): m for m in primary}
-    combined = list(primary)
-    for match in secondary:
-        if drop_tbd and "TBD" in match["teams"]:
+def parse_liquipedia_bracket(html, tournament_name):
+    """Bracket-match popups (`.brkts-popup .match-info-header`) reuse the
+    exact same markup as the global ticker's head-to-head matches (see
+    `parse_liquipedia_matches` / `_extract_teams`), just nested inside the
+    bracket widget - so this reads it the same way, minus round/column
+    position (Liquipedia's bracket DOM nests round columns recursively by
+    depth with no simple per-match round label, too fragle to reconstruct
+    reliably - so these come back as a flat list of results, not a bracket
+    tree). Always tagged mode="warfare": only Warfare tournaments use this
+    2-team bracket template."""
+    soup = BeautifulSoup(html, "html.parser")
+    matches = []
+
+    for popup in soup.select(".brkts-popup"):
+        header = popup.select_one(".match-info-header")
+        if not header:
             continue
-        bucket = _bucket(match["timestamp"])
-        existing = primary_by_bucket.get(bucket)
-        if existing is not None:
-            if not existing.get("twitch_channel") and match.get("twitch_channel"):
-                existing["twitch_channel"] = match["twitch_channel"]
+        opponents = header.select(".match-info-header-opponent")
+        if len(opponents) < 2:
             continue
-        combined.append(match)
-    return combined
+        teams = [_clean_warfare_name(t) for t in _extract_teams(header)]
+        if len(teams) < 2:
+            continue
+
+        timer = popup.select_one(".match-info-countdown .timer-object")
+        ts = int(timer["data-timestamp"]) if timer and timer.get("data-timestamp") else None
+        finished = bool(timer and timer.get("data-finished") == "finished")
+
+        score = None
+        winner_idx = None
+        score_spans = popup.select(".match-info-header-scoreholder-score")
+        if len(score_spans) >= 2:
+            score = (score_spans[0].get_text(strip=True), score_spans[1].get_text(strip=True))
+        for i, opp in enumerate(opponents[:2]):
+            if "match-info-header-winner" in opp.get("class", []):
+                winner_idx = i
+
+        matches.append({
+            "format": "head_to_head",
+            "source": "bracket",
+            "timestamp": ts,
+            "teams": teams,
+            "tournament": tournament_name,
+            "mode": "warfare",
+            "twitch_channel": None,
+            "live": False,
+            "finished": finished,
+            "score": score,
+            "winner_index": winner_idx,
+            "key": _make_key(ts or 0, teams),
+        })
+
+    return matches
+
+
+def fetch_bracket_matches():
+    """Fetches every page in BRACKET_PAGES. Returns (matches, team_links).
+    Each page fetched independently - one missing/renamed page logs and is
+    skipped rather than failing the whole batch."""
+    matches = []
+    team_links = {}
+    for page, tournament_name in BRACKET_PAGES:
+        try:
+            html = fetch_liquipedia_page_html(page)
+            matches.extend(parse_liquipedia_bracket(html, tournament_name))
+            team_links.update(build_team_links(html))
+        except Exception:
+            log.exception("bracket fetch failed for %s", page)
+    return matches, team_links
 
 
 def gather_all_matches():
-    """Fetch + merge both sources. Returns (all_matches, ubisoft_live_channels, team_links)."""
-    ubi_matches, ubi_live_channels = [], []
-    try:
-        ubi_matches, ubi_live_channels = fetch_ubisoft_matches()
-    except Exception:
-        log.exception("ubisoft fetch failed")
-
-    lp_matches = []
+    """Fetch + parse the Liquipedia match ticker, plus any configured
+    Warfare bracket pages (see BRACKET_PAGES - the ticker rarely carries
+    Warfare entries). Returns (matches, team_links)."""
+    matches = []
     team_links = {}
     try:
         html = fetch_liquipedia_html()
-        lp_matches = parse_liquipedia_matches(html)
+        matches = parse_liquipedia_matches(html)
         team_links = build_team_links(html)
     except Exception:
         log.exception("liquipedia fetch failed")
 
-    combined = _merge(ubi_matches, lp_matches)
+    bracket_matches, bracket_team_links = fetch_bracket_matches()
+    ticker_keys = {m["key"] for m in matches}
+    matches.extend(m for m in bracket_matches if m["key"] not in ticker_keys)
+    team_links = {**bracket_team_links, **team_links}  # ticker links win on overlap - same source, no reason to prefer either, but keep it deterministic
 
-    try:
-        flag_map, logo_map, results_by_pair = build_siege_gg_data()
-        combined = attach_siege_gg_data(combined, flag_map, logo_map, results_by_pair)
-    except Exception:
-        log.exception("siege.gg fetch failed")
-
-    return combined, ubi_live_channels, team_links
+    return matches, team_links
 
 
 def split_by_status(matches, now=None):
@@ -611,3 +518,82 @@ def split_by_status(matches, now=None):
     upcoming = [m for m in matches if not m.get("live") and not m.get("finished") and m["timestamp"] > now]
     completed = [m for m in matches if m.get("finished")]
     return live, upcoming, completed
+
+
+def _dfgw_get(endpoint, params):
+    """GET against TiMi's api-dfgw backend. Raises on transport errors and
+    on the API's own {"result": <nonzero>, "msg": "..."} error convention
+    (result 0 = success; anything else carries a Chinese-language `msg`,
+    e.g. 20010001 for an invalid `region`)."""
+    resp = requests.get(
+        f"{DFGW_API}/{endpoint}",
+        params=params,
+        headers={"User-Agent": DFGW_UA, "Accept": "application/json"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if payload.get("result") != 0:
+        raise RuntimeError(f"api-dfgw {endpoint} error {payload.get('result')}: {payload.get('msg')}")
+    return payload["data"]
+
+
+def fetch_season_config(region):
+    """region is "EMEA" or "AM". Returns {season_id, season_name, utc_offset,
+    region, season_list, live_current} for RISE Series' current season."""
+    return _dfgw_get("getSeasonConfig", {"region": region})
+
+
+def fetch_standings(season_id):
+    """Overall season standings: [{rank, team_id, team_name, logo_url, points}, ...]."""
+    return _dfgw_get("getStandings", {"season_id": season_id})["list"]
+
+
+def fetch_team_list(season_id):
+    """Rosters: [{team_id, team_name, logo_url, players: [{player_id, nickname, avatar_url}, ...]}, ...]."""
+    return _dfgw_get("getTeamList", {"season_id": season_id})["list"]
+
+
+def fetch_schedule_list(season_id):
+    """Upcoming/past lobbies: [{schedule_id, stage, title, match_time (unix
+    string), status, teams: [{team_id, team_name, logo_url, rank}, ...]}, ...].
+    Each entry is a multi-team lobby (RISE Series runs 3v3v3 groups of up to
+    6 teams), not a head-to-head match - there is no 2-team bracket model
+    here, unlike the Warfare track."""
+    return _dfgw_get("getScheduleList", {"season_id": season_id})["list"]
+
+
+def fetch_schedule_result(schedule_id):
+    """Final per-team placement for one lobby: {schedule_id, results:
+    [{rank, team_id, team_name, logo_url, decode_count, kill_score,
+    asset_score}, ...]}. No single combined "points" field is exposed here -
+    `fetch_standings` carries the season-cumulative points instead."""
+    return _dfgw_get("getScheduleResult", {"schedule_id": schedule_id})
+
+
+def fetch_mvp_ranking(season_id):
+    """[{rank, player_id, player_name, avatar_url, team_name, mvp_count}, ...]."""
+    return _dfgw_get("getMVPRanking", {"season_id": season_id})["list"]
+
+
+def fetch_news_list(region):
+    """region is "EMEA" or "AM" (not season_id, unlike the other endpoints).
+    Returns {carousel: [{news_id, title, carousel_url, link_url}, ...],
+    list: [{news_id, title, link_url, updated_at}, ...]}."""
+    return _dfgw_get("getNewsList", {"region": region})
+
+
+def gather_rise_series_data(region):
+    """Full snapshot for one RISE Series region: season config, standings,
+    rosters, and the schedule (lobby) list. Raises on any failure - unlike
+    `gather_all_matches`, there's no partial-source fallback to fall back to
+    for this data, so let the caller decide how to handle it."""
+    config = fetch_season_config(region)
+    season_id = config["season_id"]
+    return {
+        "season_id": season_id,
+        "region": config["region"],
+        "standings": fetch_standings(season_id),
+        "teams": fetch_team_list(season_id),
+        "schedule": fetch_schedule_list(season_id),
+    }
