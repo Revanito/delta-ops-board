@@ -239,6 +239,45 @@ def render_section(title, row_htmls, kind, empty_text):
     </section>"""
 
 
+def render_day_grouped_section(title, matches, row_renderer, kind, empty_text):
+    """Like render_section, but splits already-(desc-)sorted matches into
+    one ticket-list grid per local calendar day, each under its own labeled
+    divider - a long flat wall of same-shaped result cards otherwise reads
+    as undifferentiated, and grouping by day also keeps grid row-stretch
+    alignment (see .ticket-list align-items: stretch) from spanning across
+    unrelated days."""
+    if not matches:
+        return f"""
+    <section class="section-{kind}">
+      <h2>{e(title)}</h2>
+      <p class="empty">{e(empty_text)}</p>
+    </section>"""
+
+    groups = []
+    current_date, current_group = None, None
+    for m in matches:
+        d = datetime.fromtimestamp(m["timestamp"], tz=timezone.utc).astimezone(LOCAL_TZ).date()
+        if d != current_date:
+            current_date, current_group = d, []
+            groups.append((d, current_group))
+        current_group.append(m)
+
+    day_blocks = "".join(
+        f"""
+      <div class="day-group">
+        <h3 class="day-divider">{e(d.strftime("%A %d %b"))}</h3>
+        <div class="ticket-list">{"".join(row_renderer(m) for m in group)}</div>
+      </div>"""
+        for d, group in groups
+    )
+
+    return f"""
+    <section class="section-{kind}">
+      <h2>{e(title)}</h2>
+      {day_blocks}
+    </section>"""
+
+
 # ---------------------------------------------------------------------------
 # Operations track: scene-wide lobby results (from Liquipedia) + RISE Series
 # standings/schedule (from api-dfgw, RISE Series only)
@@ -387,13 +426,17 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 .layout {
-  max-width: 1300px; margin: 0 auto; padding: 0 0.5rem;
-  display: grid; grid-template-columns: 1fr 340px; gap: 2rem; align-items: start;
+  max-width: 1800px; margin: 0 auto; padding: 0 0.5rem;
+  display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 1.75rem; align-items: start;
 }
 .layout.no-sidebar { grid-template-columns: 1fr; max-width: 980px; }
-@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+@media (max-width: 1250px) { .layout { grid-template-columns: 1fr; } }
 main { min-width: 0; }
-.sidebar { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1.75rem; min-width: 0; }
+/* The two RISE Series panels become direct grid items of .layout (its own
+   column each) rather than children of a boxed sidebar - `display: contents`
+   drops this wrapper from the box tree while keeping its children
+   participating in the parent grid. */
+.sidebar { display: contents; }
 .site-nav {
   max-width: 980px; margin: 0 auto; padding: 1.1rem 0.5rem 0;
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
@@ -437,10 +480,26 @@ h3.rise-subhead {
 section { margin-bottom: 2.25rem; }
 .section-live h2 { color: var(--live); }
 .ticket-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 0.6rem; align-items: start; }
-.section-completed .ticket-list, .section-rise .ticket-list { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+/* stretch (not start): row-neighbors otherwise render at their own content
+   height - a 1-line title next to a 2-line one looks visibly misaligned
+   even though both sit in the same grid row. .ticket's flex column +
+   .ticket-meta's auto top-margin (below) is what pins the meta/badge row
+   to a shared bottom edge once the card is stretched taller than its
+   own content. */
+.section-completed .ticket-list, .section-rise .ticket-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: stretch;
+}
+.day-group { margin-bottom: 1.1rem; }
+.day-group:last-child { margin-bottom: 0; }
+.day-divider {
+  font: 700 0.7rem/1 -apple-system, "Segoe UI", sans-serif; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-dim); margin: 0 0 0.6rem;
+  padding-bottom: 0.45rem; border-bottom: 1px solid var(--border);
+}
 .ticket {
   background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--border);
-  border-radius: 4px; padding: 0.85rem 1rem; position: relative;
+  border-radius: 4px; padding: 0.7rem 0.85rem; position: relative;
+  display: flex; flex-direction: column; gap: 0.4rem;
 }
 .ticket-live { border-left-color: var(--live); padding-top: 2.1rem; }
 .ticket-completed, .ticket-lobby { opacity: 0.92; }
@@ -467,7 +526,7 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .score .digit.winner { color: var(--win-ink); background: var(--win-box); border-radius: 4px; padding: 0.08rem 0.4rem; }
 .ticket-meta {
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
-  margin-top: 0.55rem; font-size: 0.78rem; color: var(--text-dim);
+  margin-top: auto; font-size: 0.78rem; color: var(--text-dim);
 }
 .dot-sep { opacity: 0.6; }
 .when { font-variant-numeric: tabular-nums; }
@@ -498,6 +557,7 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .lobby-places { margin-top: 0.4rem; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
 .lobby-place { font-weight: 600; }
 .lobby-more, .empty-inline { color: var(--text-dim); }
+.section-rise { position: sticky; top: 1rem; margin-top: 15px; min-width: 0; margin-bottom: 0; }
 .section-rise h2 { color: var(--accent); }
 .rise-grid { display: flex; flex-direction: column; gap: 1rem; }
 .standings-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -527,10 +587,10 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .rewards-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.6rem; }
 .reward-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-  padding: 0.75rem; display: flex; flex-direction: column; align-items: center;
-  text-align: center; gap: 0.35rem; width: 150px;
+  padding: 0.65rem; display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 0.3rem; width: 130px;
 }
-.reward-img { width: 64px; height: 64px; object-fit: contain; border-radius: 6px; background: var(--bg-wash); padding: 0.3rem; }
+.reward-img { width: 56px; height: 56px; object-fit: contain; border-radius: 6px; background: var(--bg-wash); padding: 0.25rem; }
 .reward-name { font: 700 0.82rem/1.25 "Segoe UI", -apple-system, sans-serif; }
 .reward-time { font: 700 0.7rem/1 -apple-system, sans-serif; color: var(--accent); text-transform: uppercase; letter-spacing: 0.03em; }
 .reward-campaign { font-size: 0.7rem; color: var(--text-dim); }
@@ -663,12 +723,10 @@ def build_operations_html(matches, rise_data_by_region, generated_at, rewards=No
     scene_results = [m for m in matches if m.get("mode") == "operations" and m.get("format") == "lobby_result"]
     scene_results = [m for m in scene_results if m["timestamp"] >= now - RESULTS_WINDOW_DAYS * 86400]
     scene_results_sorted = sorted(scene_results, key=lambda m: m["timestamp"], reverse=True)
-    scene_rows = [render_lobby_result_row(m) for m in scene_results_sorted]
-
     sections = render_rewards_section(rewards, campaign_label=campaign_label)
-    sections += render_section(
+    sections += render_day_grouped_section(
         f"Recent results across the scene (last {int(RESULTS_WINDOW_DAYS)} days)",
-        scene_rows, "completed",
+        scene_results_sorted, render_lobby_result_row, "completed",
         "No recent results.",
     )
 
