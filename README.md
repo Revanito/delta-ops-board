@@ -6,16 +6,17 @@ A small Docker service that tracks Delta Force's competitive esports scene from 
 
 ## What it does
 
-**`delta-site`** — regenerates two static pages and pushes them to `docs/` on this repo's `main` branch, only when the rendered pages actually changed. GitHub Pages serves that folder.
+**`delta-site`** — regenerates three static pages and pushes them to `docs/` on this repo's `main` branch, only when the rendered pages actually changed. GitHub Pages serves that folder.
 
-Delta Force's esports scene runs two parallel tracks by game mode, with different formats and different data sources, so the site is split into two pages by mode rather than one combined page:
+Delta Force's esports scene runs two parallel tracks by game mode, with different formats and different data sources, so the site is split by mode/league rather than one combined page:
 
 - **`index.html` (Warfare)** — the traditional team-vs-team mode. Live now, Upcoming (next 30 days), Results (a mix of recent ticker results and the full result set of whatever Warfare tournaments are in `BRACKET_PAGES`, see below).
 - **`operations.html` (Operations)** — the extraction-shooter/lobby mode. Active drops, recent results across the whole Operations scene (winner-only, from Liquipedia), and a sidebar with RISE Series EMEA + Americas: standings table, top-5 MVPs, and the most recent lobby placements, each pulled from TiMi's own RISE Series backend.
+- **`dfpl.html` (DFPL)** — China's domestic Operations-mode league, pulled from Tencent's own DFPL backend: team standings (sorted by win count - DFPL exposes no points field), a top-5 players panel by K/D, and upcoming/recent lobby cards with VOD links. Same template shape as the RISE Series panels, reused rather than rebuilt. Team/player names here are genuinely Chinese-only data - see Notes for how names are handled without a translation API.
 
-Both pages share an "Active drops" section (real campaign name + exact date range, see Data sources below) and a small top nav to switch between them.
+All three pages share an "Active drops" section (real campaign name + exact date range, see Data sources below) and a small top nav to switch between them.
 
-Rebuild frequency adapts automatically: every `SITE_BUILD_INTERVAL_MINUTES` (10) while a Warfare match is live or one's scheduled to start within `ACTIVE_LOOKAHEAD_HOURS` (48h), otherwise every `SITE_IDLE_BUILD_INTERVAL_MINUTES` (24h) - so quiet stretches between tournaments don't spam commits or Pages rebuilds for pages that aren't changing anyway. This "is an event going on" check only looks at the Warfare track (see Known gaps below for why).
+Rebuild frequency adapts automatically: every `SITE_BUILD_INTERVAL_MINUTES` (10) while a Warfare match is live or one's scheduled to start within `ACTIVE_LOOKAHEAD_HOURS` (48h). Outside of that, it rebuilds once daily at local midnight (`TZ_NAME`) instead of on a rolling interval - so quiet stretches between tournaments still get one guaranteed refresh a day (RISE Series/DFPL stats, drops calendar, ...), rather than silently going stale for however long the container happens to have been running. This "is an event going on" check only looks at the Warfare track (see Known gaps below for why).
 
 ## Data sources
 
@@ -24,6 +25,7 @@ Rebuild frequency adapts automatically: every `SITE_BUILD_INTERVAL_MINUTES` (10)
 - **[api-dfgw.timi-es.com](https://api-dfgw.timi-es.com)** — TiMi's own backend for RISE Series (undocumented but public, no auth needed; discovered behind playdeltaforce.com's RISE Series page). Standings, rosters, schedule/lobby results, and MVP ranking. Confirmed working for RISE Series EMEA + Americas only - don't assume other Operations tournaments run on this backend without checking.
 - **[twitchdrops.app](https://twitchdrops.app/game/delta-force-hawk-ops)** — active drop rewards and eligible channels. Note the URL slug is the game's full Twitch category name ("Delta Force: Hawk Ops"), not `delta-force`.
 - **playdeltaforce.com's drops calendar** (`activitymaps.json`, fetched straight off the game's own drops microsite) — the official campaign name + exact date range per drops event. twitchdrops.app's own campaign field comes back blank, so this is the only source with real dates; used to label the "Active drops" section.
+- **[df.timi-esports.qq.com](https://df.qq.com/cp/DFPL/)** — Tencent's own backend for DFPL, China's domestic Operations league. Undocumented but public/no-auth (found the same way as api-dfgw: traced network calls from a real browser session). Team/player box-score stats and a lobby schedule with real timestamps + finish-order placements. No points/rank field exists here at all (unlike RISE Series) - the site sorts by win count as the closest analog to a real ranking.
 
 Two sources exist for other games in this family but have no Delta Force equivalent: no Ubisoft-style official schedule page with a trustworthy `live` flag, and no siege.gg-style stats site with flags/logos/bracket API (`deltaforceesports.com` and `escharts.com` were both checked and ruled out - see Known gaps).
 
@@ -33,6 +35,7 @@ Delta Force's esports infrastructure is thinner than Rainbow Six's, and these ar
 
 - **No confirmed "live right now" signal.** r6-ops-board trusted Ubisoft's official feed for this. Delta Force has nothing equivalent, so a match is only tentatively marked live off Liquipedia's own ticker state (a past start time with no result posted yet, within a few hours).
 - **No automatic bracket discovery.** See `BRACKET_PAGES` above - has to be updated by hand after each new Warfare event.
+- **No automatic season rollover for DFPL.** `DFPL_SEASON_ID` in `sources.py` is a hardcoded current-season string - update it by hand once DFPL moves to its next season. Same underlying issue as `BRACKET_PAGES`: nothing in either backend exposes "here's the current season" as a stable, discoverable signal.
 - **No team flags or logos** for the Warfare track. No data source has been found for this yet.
 - **escharts.com and teamrrq.com were both ruled out** as automated sources - both sit behind Cloudflare's managed JS challenge, which a plain HTTP scraper can't get past (and isn't worth building around).
 
@@ -55,3 +58,4 @@ State lives entirely in the site generator's own git clone at `./site-repo/` - t
 - Set `RUN_ON_START=true` in `.env` to make the service build once immediately on startup instead of waiting for its first scheduled slot - useful when testing.
 - `TWITCH_CHANNELS` defaults to the official channel (`deltaforcegameofficial`) if left blank in `.env` - set it to override, not to opt in.
 - Unlike r6-ops-board, there's no drops/events archive here yet (no `archive/*.json`, no `drops.html`/`events.html` pages) - a reasonable future addition, following the same pattern, if it turns out to be wanted.
+- **DFPL name handling, deliberately zero-API-key:** team display names use the `clubid` field (already a clean Latin slug, e.g. `ag` → `AG`) rather than `team_name` (Chinese) or `team_name_en` (identical to `team_name` despite the field name - verified, not actually translated). Player handles are split off the `丨` separator where present (~62% of the current roster has one, e.g. `成都AG丨emopig` → `emopig`); the rest are shown as the original Chinese nickname rather than machine-translated - a translation API would convert nickname *meaning*, not how the player is actually known, and would need its own API key/quota/cost for a worse result. See `sources.dfpl_team_name` / `sources.dfpl_player_handle`.

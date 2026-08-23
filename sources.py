@@ -18,6 +18,17 @@ Two data sources, covering different halves of the scene:
   playdeltaforce.com first). This is an undocumented third-party backend,
   not a stable public API, and could change shape or disappear without
   notice - re-verify field names if these calls start failing.
+- Tencent's df.timi-esports.qq.com backend, behind df.qq.com/cp/DFPL/ - the
+  official site for DFPL ("烽火职业联赛", Delta Force Pro League), China's
+  domestic Operations-mode league. Same undocumented-but-public shape as
+  api-dfgw (found the same way: traced network calls from a real browser
+  session against the site). Unlike RISE Series this has no points/rank
+  field at all - `getDfTeamRankList`/`getDfPlayerRankList` return raw box-
+  score stats in insertion order, not a standings table, so "ranking" here
+  means picking a stat to sort by ourselves (see gather_dfpl_data). This
+  data is genuinely Chinese-only (team/player names) - see dfpl_team_name/
+  dfpl_player_handle for the zero-cost, zero-API-key approach taken
+  instead of machine translation (which mangles proper nouns anyway).
 
 Unlike r6-notifier, there's no Ubisoft-equivalent official schedule page and
 no siege.gg-equivalent third-party stats site for Delta Force (checked
@@ -596,4 +607,107 @@ def gather_rise_series_data(region):
         "standings": fetch_standings(season_id),
         "teams": fetch_team_list(season_id),
         "schedule": fetch_schedule_list(season_id),
+    }
+
+
+# ---------------------------------------------------------------------------
+# DFPL (Delta Force Pro League) - China's domestic Operations-mode league
+# ---------------------------------------------------------------------------
+
+DFPL_API = "https://df.timi-esports.qq.com/df"
+DFPL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+DFPL_SEASON_ID = "DFPL2026S2"  # current season - update when DFPL rolls to a new one
+
+DFPL_NAME_SEPARATORS = ("丨", "｜", "|")
+
+
+def _dfpl_post(endpoint, payload):
+    resp = requests.post(
+        f"{DFPL_API}/{endpoint}",
+        json=payload,
+        headers={"User-Agent": DFPL_UA, "Content-Type": "application/json"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("result") not in (0, None):
+        raise RuntimeError(f"DFPL {endpoint} error {data.get('result')}: {data.get('msg')}")
+    return data["data"]
+
+
+def fetch_dfpl_team_list(season_id):
+    """[{teamid, clubid, team_name, team_logo, team_name_en}, ...]. Despite
+    the name, `team_name_en` is not actually translated - it's identical to
+    `team_name` (verified) - so it's not used for display; see
+    dfpl_team_name instead."""
+    return _dfpl_post("getDfTeamList", {"season_id": season_id})
+
+
+def fetch_dfpl_team_rank_list(season_id):
+    """Raw per-team box-score stats (kills, deaths, win_times, avg_damage,
+    escape_rate, ...) - NOT pre-sorted by any competitive ranking (verified:
+    comes back in team-id/alphabetical order, not by wins or any other
+    stat). Sort by whichever stat you want to lead with."""
+    return _dfpl_post("getDfTeamRankList", {"season_id": season_id})
+
+
+def fetch_dfpl_player_rank_list(season_id):
+    """Same deal as fetch_dfpl_team_rank_list but per-player (kd, kills,
+    assists, avg_damage, headshot rate, escape_rate, ...)."""
+    return _dfpl_post("getDfPlayerRankList", {"season_id": season_id})
+
+
+def fetch_dfpl_schedule_list(season_id):
+    """Lobby-format schedule entries: {scheduleid, start_timestamp,
+    schedule_status (1=upcoming, 4=finished - verified against
+    start_timestamp/schedule_result presence across a full season),
+    team_list (";"-joined team_ids, empty until matchups are set),
+    schedule_result (";"-joined team_ids in FINISH order - empty until the
+    lobby is settled), reply_list ([{title, vid, ...}, ...] - VOD replays,
+    playable at https://v.qq.com/x/page/<vid>.html)."""
+    return _dfpl_post("getDfScheduleList", {"season_id": season_id})
+
+
+def dfpl_team_name(team_id, team_map):
+    """No English name exists in the API (see fetch_dfpl_team_list) - using
+    `clubid` (already a clean Latin slug, e.g. "ag", "blg", "estar") is a
+    zero-cost, zero-API-key stand-in for a proper display name. Falls back
+    to the raw team_id if the team isn't in team_map."""
+    t = team_map.get(team_id)
+    return t["clubid"].upper() if t else team_id
+
+
+def dfpl_player_handle(player_name):
+    """Player names come as "<Chinese team prefix><separator><handle>" in
+    ~62% of cases (verified across a full season's roster) - the handle
+    half is usually already Latin script (e.g. "成都AG丨emopig" ->
+    "emopig"). The remaining ~38% have no Latin handle at all; rather than
+    machine-translate a nickname (which translates meaning, not sound, and
+    reads as wrong - see module docstring), those are left as the original
+    Chinese text."""
+    for sep in DFPL_NAME_SEPARATORS:
+        if sep in player_name:
+            return player_name.split(sep)[-1]
+    return player_name
+
+
+_DFPL_SCHEDULE_ID_RE = re.compile(r"_W(\d+)M(\d+)$")
+
+
+def dfpl_schedule_title(schedule_id):
+    m = _DFPL_SCHEDULE_ID_RE.search(schedule_id)
+    return f"Week {m.group(1)} · Match {m.group(2)}" if m else schedule_id
+
+
+def gather_dfpl_data(season_id=DFPL_SEASON_ID):
+    """Full snapshot for one DFPL season. Raises on any failure - same
+    contract as gather_rise_series_data."""
+    teams = fetch_dfpl_team_list(season_id)
+    team_map = {t["teamid"]: t for t in teams}
+    return {
+        "season_id": season_id,
+        "team_map": team_map,
+        "team_ranks": fetch_dfpl_team_rank_list(season_id),
+        "player_ranks": fetch_dfpl_player_rank_list(season_id),
+        "schedule": fetch_dfpl_schedule_list(season_id),
     }

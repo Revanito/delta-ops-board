@@ -3,7 +3,7 @@ import logging
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import sources
@@ -389,6 +389,86 @@ def render_rise_series_section(region_label, data):
 
 
 # ---------------------------------------------------------------------------
+# DFPL (Delta Force Pro League, China) - see sources.py's DFPL section
+# ---------------------------------------------------------------------------
+
+def render_dfpl_standings_row(rank, name, logo_url, wins):
+    logo_html = f'<img class="team-logo-sm" src="{e(logo_url)}" alt="" loading="lazy">' if logo_url else ""
+    return f'<tr><td class="standings-rank">{e(rank)}</td><td class="standings-team">{logo_html}<span>{e(name)}</span></td><td class="standings-points">{e(wins)}</td></tr>'
+
+
+def render_dfpl_standings_table(team_ranks, team_map):
+    """DFPL exposes no points/rank field (see sources.fetch_dfpl_team_rank_list) -
+    ranked here by win_times, the closest analog to a competitive result."""
+    if not team_ranks:
+        return '<p class="empty">Standings unavailable.</p>'
+    ranked = sorted(team_ranks, key=lambda t: t["win_times"], reverse=True)
+    rows = "".join(
+        render_dfpl_standings_row(i + 1, sources.dfpl_team_name(t["team_id"], team_map), t.get("team_logo"), t["win_times"])
+        for i, t in enumerate(ranked)
+    )
+    return f"""
+    <table class="standings-table">
+      <thead><tr><th>#</th><th>Team</th><th>Wins</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>"""
+
+
+def render_dfpl_player_row(handle, team_name, kd):
+    return f'<li class="mvp-row"><span class="mvp-name">{e(handle)}</span><span class="mvp-team">{e(team_name)}</span><span class="mvp-count">{e(kd)} KD</span></li>'
+
+
+def render_dfpl_player_panel(player_ranks, team_map):
+    if not player_ranks:
+        return ""
+    top = sorted(player_ranks, key=lambda p: p["kd"], reverse=True)[:5]
+    rows = "".join(
+        render_dfpl_player_row(sources.dfpl_player_handle(p["player_name"]), sources.dfpl_team_name(p["team_id"], team_map), p["kd"])
+        for p in top
+    )
+    return f'<div class="side-panel"><h3>Top players (K/D)</h3><ul class="mvp-list">{rows}</ul></div>'
+
+
+def render_dfpl_schedule_card(entry, team_map):
+    """One DFPL lobby (getDfScheduleList entry). schedule_status 4 = finished
+    (verified against a full season); team_list/schedule_result are
+    ";"-joined team_ids, empty until set."""
+    finished = entry.get("schedule_status") == 4
+    when = fmt_dt(int(entry["start_timestamp"]))
+    title = sources.dfpl_schedule_title(entry["scheduleid"])
+
+    replay_html = ""
+    reply_list = entry.get("reply_list") or []
+    if reply_list and reply_list[0].get("vid"):
+        replay_html = f'<a class="result-link" href="https://v.qq.com/x/page/{e(reply_list[0]["vid"])}.html" target="_blank" rel="noopener">Watch VOD ↗</a>'
+
+    result_ids = [t for t in (entry.get("schedule_result") or "").split(";") if t]
+    if finished and result_ids:
+        ranked_names = [sources.dfpl_team_name(t, team_map) for t in result_ids]
+        top = ranked_names[:3]
+        rest = len(ranked_names) - len(top)
+        places = " · ".join(f'<span class="lobby-place">#{i + 1} {e(name)}</span>' for i, name in enumerate(top))
+        if rest > 0:
+            places += f' <span class="lobby-more">+{rest} more</span>'
+        places_html = f'<div class="lobby-places">{places}</div>'
+        badge = '<span class="badge badge-done">Final</span>'
+    else:
+        places_html = '<div class="lobby-places"><span class="empty-inline">Result pending</span></div>'
+        badge = ""
+
+    return f"""
+    <article class="ticket ticket-lobby">
+      <div class="lobby-title">{e(title)}</div>
+      {places_html}
+      <div class="ticket-meta">
+        <span class="when">{e(when)} Paris</span>
+        {replay_html}
+        {badge}
+      </div>
+    </article>"""
+
+
+# ---------------------------------------------------------------------------
 # Shared page shell
 # ---------------------------------------------------------------------------
 
@@ -557,6 +637,7 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .lobby-places { margin-top: 0.4rem; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
 .lobby-place { font-weight: 600; }
 .lobby-more, .empty-inline { color: var(--text-dim); }
+.dfpl-note { font-size: 0.8rem; margin: -0.4rem 0 1rem; max-width: 65ch; }
 .section-rise { position: sticky; top: 1rem; margin-top: 15px; min-width: 0; margin-bottom: 0; }
 .section-rise h2 { color: var(--accent); }
 .rise-grid { display: flex; flex-direction: column; gap: 1rem; }
@@ -613,6 +694,7 @@ def render_nav(active):
   <div class="site-nav-links">
     {link("index.html", "Warfare", "warfare")}
     {link("operations.html", "Operations", "operations")}
+    {link("dfpl.html", "DFPL", "dfpl")}
   </div>
 </nav>"""
 
@@ -743,6 +825,47 @@ def build_operations_html(matches, rise_data_by_region, generated_at, rewards=No
     )
 
 
+def build_dfpl_html(data, generated_at):
+    if not data:
+        sections = '<p class="empty">DFPL data unavailable.</p>'
+    else:
+        team_map = data["team_map"]
+        now = time.time()
+
+        schedule_sorted = sorted(data["schedule"], key=lambda s: int(s["start_timestamp"]), reverse=True)
+        finished = [s for s in schedule_sorted if s.get("schedule_status") == 4]
+        upcoming = sorted(
+            (s for s in data["schedule"] if s.get("schedule_status") == 1 and s.get("team_list") and int(s["start_timestamp"]) > now),
+            key=lambda s: int(s["start_timestamp"]),
+        )
+
+        sections = f"""
+    <section class="section-rise">
+      <h2>DFPL {e(data["season_id"])} standings</h2>
+      <p class="empty-inline dfpl-note">Ranked by win count - DFPL's own API doesn't expose a points/standings field (see README). Team names shown as their short code; player names are their Latin handle where one exists in the roster data, otherwise the original Chinese nickname.</p>
+      <div class="rise-grid">
+        <div class="rise-standings">{render_dfpl_standings_table(data["team_ranks"], team_map)}</div>
+        <div class="rise-side">{render_dfpl_player_panel(data["player_ranks"], team_map)}</div>
+      </div>
+    </section>"""
+
+        if upcoming:
+            sections += render_section(
+                "Upcoming lobbies", [render_dfpl_schedule_card(s, team_map) for s in upcoming[:RISE_LOBBIES_SHOWN]],
+                "upcoming", "",
+            )
+        sections += render_section(
+            "Recent lobbies", [render_dfpl_schedule_card(s, team_map) for s in finished[:RISE_LOBBIES_SHOWN]],
+            "completed", "No results yet.",
+        )
+
+    return build_page(
+        "dfpl", "Delta Force · DFPL", "Ops Board",
+        "DFPL (烽火职业联赛) team and player stats for China's domestic Operations-mode league, pulled from Tencent's own DFPL backend.",
+        sections, "df.qq.com (DFPL)", generated_at,
+    )
+
+
 def build_and_commit():
     log.info("building site")
     ensure_repo()
@@ -778,6 +901,12 @@ def build_and_commit():
             log.exception("RISE Series %s fetch failed", region_label)
             rise_data_by_region[region_key] = None
 
+    dfpl_data = None
+    try:
+        dfpl_data = sources.gather_dfpl_data()
+    except Exception:
+        log.exception("DFPL fetch failed")
+
     twitch_info, broadcasts = {}, []
     if TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET:
         channels_to_check = set(TWITCH_CHANNELS)
@@ -801,6 +930,7 @@ def build_and_commit():
         campaign_label=campaign_label,
     )
     operations_page = build_operations_html(matches, rise_data_by_region, generated_at, rewards=rewards, campaign_label=campaign_label)
+    dfpl_page = build_dfpl_html(dfpl_data, generated_at)
 
     docs_dir = os.path.join(CLONE_DIR, DOCS_SUBDIR)
     os.makedirs(docs_dir, exist_ok=True)
@@ -808,6 +938,8 @@ def build_and_commit():
         f.write(warfare_page)
     with open(os.path.join(docs_dir, "operations.html"), "w", encoding="utf-8") as f:
         f.write(operations_page)
+    with open(os.path.join(docs_dir, "dfpl.html"), "w", encoding="utf-8") as f:
+        f.write(dfpl_page)
     nojekyll = os.path.join(docs_dir, ".nojekyll")
     if not os.path.exists(nojekyll):
         open(nojekyll, "w").close()
@@ -832,9 +964,15 @@ def safe_build_and_commit():
         return True  # assume the worst so we retry at the short interval, not the 24h one
 
 
+def _seconds_until_next_local_midnight():
+    now = datetime.now(tz=LOCAL_TZ)
+    next_midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (next_midnight - now).total_seconds()
+
+
 def main():
     log.info(
-        "delta-site starting, active interval=%d min, idle interval=%d min (event window: next %g h)",
+        "delta-site starting, active interval=%d min, idle: daily at local midnight (capped at %d min) (event window: next %g h)",
         BUILD_INTERVAL_MINUTES, IDLE_BUILD_INTERVAL_MINUTES, ACTIVE_LOOKAHEAD_HOURS,
     )
 
@@ -843,9 +981,18 @@ def main():
         event_active = safe_build_and_commit()
 
     while True:
-        interval_minutes = BUILD_INTERVAL_MINUTES if event_active else IDLE_BUILD_INTERVAL_MINUTES
-        log.info("next build in %d min (%s)", interval_minutes, "event window" if event_active else "idle")
-        time.sleep(interval_minutes * 60)
+        if event_active:
+            sleep_seconds = BUILD_INTERVAL_MINUTES * 60
+            log.info("next build in %d min (event window)", BUILD_INTERVAL_MINUTES)
+        else:
+            # A rolling "sleep N hours" idle interval drifts and never lands
+            # on a predictable time - anchoring to local midnight instead
+            # gives a real daily refresh, same spirit as r6-notifier's fixed
+            # CHECK_TIMES. IDLE_BUILD_INTERVAL_MINUTES still caps the wait
+            # (relevant right after midnight, when it's otherwise ~24h away).
+            sleep_seconds = min(_seconds_until_next_local_midnight(), IDLE_BUILD_INTERVAL_MINUTES * 60)
+            log.info("next build in %.0f min (idle, next local midnight or cap)", sleep_seconds / 60)
+        time.sleep(sleep_seconds)
         event_active = safe_build_and_commit()
 
 
