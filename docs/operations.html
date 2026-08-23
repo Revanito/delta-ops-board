@@ -39,17 +39,33 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 .layout {
-  max-width: 1800px; margin: 0 auto; padding: 0 0.5rem;
-  display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 1.75rem; align-items: start;
+  margin: 0 auto; padding: 0 0.5rem;
+  display: grid; gap: 1.75rem; align-items: start;
+  /* align-items:start matters here: the grid ROW is still sized to the
+     tallest item regardless, but start keeps `.sidebar`'s own box at its
+     natural (shorter) height within that tall row instead of stretching
+     it to match - that gap is exactly the "room" position:sticky needs to
+     actually stick as `main` scrolls past it. */
 }
 .layout.no-sidebar { grid-template-columns: 1fr; max-width: 980px; }
-@media (max-width: 1250px) { .layout { grid-template-columns: 1fr; } }
+/* sidebar-double (Operations): two same-shape panels (RISE EMEA/Americas)
+   each get their own full column - .sidebar itself becomes `display:
+   contents` so its children (not the wrapper) are the grid items. */
+.layout.sidebar-double { grid-template-columns: 3fr 1fr 1fr; max-width: 1800px; }
+.layout.sidebar-double .sidebar { display: contents; }
+@media (max-width: 1250px) { .layout.sidebar-double { grid-template-columns: 1fr; } }
+/* sidebar-single (DFPL, and any future single-panel page): one real boxed
+   sidebar stacking whatever it's given (player panel, upcoming/recent
+   lobby sections, ...) in a single wide column next to the main content. */
+.layout.sidebar-single { grid-template-columns: 1fr 480px; max-width: 1500px; }
+@media (max-width: 1000px) { .layout.sidebar-single { grid-template-columns: 1fr; } }
 main { min-width: 0; }
-/* The two RISE Series panels become direct grid items of .layout (its own
-   column each) rather than children of a boxed sidebar - `display: contents`
-   drops this wrapper from the box tree while keeping its children
-   participating in the parent grid. */
-.sidebar { display: contents; }
+.sidebar { position: sticky; top: 1rem; margin-top: 15px; display: flex; flex-direction: column; gap: 1.75rem; min-width: 0; }
+/* single-sidebar pages (DFPL) have no per-panel heading of their own at
+   the very top the way sidebar-double's RISE panels do, so nudging it
+   down further aligns it with where the main column's content (not just
+   its header) actually starts. */
+.layout.sidebar-single .sidebar { margin-top: 95px; }
 .site-nav {
   max-width: 980px; margin: 0 auto; padding: 1.1rem 0.5rem 0;
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
@@ -170,7 +186,9 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .lobby-places { margin-top: 0.4rem; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
 .lobby-place { font-weight: 600; }
 .lobby-more, .empty-inline { color: var(--text-dim); }
-.dfpl-note { font-size: 0.8rem; margin: -0.4rem 0 1rem; max-width: 65ch; }
+.dfpl-intro { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1.25rem; }
+.dfpl-intro h2 { margin-bottom: 0.5rem; }
+.dfpl-note { margin: 0; max-width: 200ch; }
 .section-rise { position: sticky; top: 1rem; margin-top: 15px; min-width: 0; margin-bottom: 0; }
 .section-rise h2 { color: var(--accent); }
 .section-dfpl h2 { color: var(--accent); }
@@ -227,7 +245,7 @@ a { color: inherit; }
     <a class="nav-link" href="dfpl.html">DFPL</a>
   </div>
 </nav>
-<div class="layout">
+<div class="layout sidebar-double">
 <main>
   <header>
     <p class="eyebrow">Ops Board</p>
@@ -650,7 +668,7 @@ a { color: inherit; }
       </div>
     </section>
   <footer>
-    <span>Updated Sun 23 Aug 2026, 10:24 (Paris time)</span>
+    <span>Updated Sun 23 Aug 2026, 10:49 (Paris time)</span>
     <span>Sources: Liquipedia, playdeltaforce.com (RISE Series + drops calendar), twitchdrops.app</span>
   </footer>
 </main>

@@ -39,17 +39,33 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 .layout {
-  max-width: 1800px; margin: 0 auto; padding: 0 0.5rem;
-  display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 1.75rem; align-items: start;
+  margin: 0 auto; padding: 0 0.5rem;
+  display: grid; gap: 1.75rem; align-items: start;
+  /* align-items:start matters here: the grid ROW is still sized to the
+     tallest item regardless, but start keeps `.sidebar`'s own box at its
+     natural (shorter) height within that tall row instead of stretching
+     it to match - that gap is exactly the "room" position:sticky needs to
+     actually stick as `main` scrolls past it. */
 }
 .layout.no-sidebar { grid-template-columns: 1fr; max-width: 980px; }
-@media (max-width: 1250px) { .layout { grid-template-columns: 1fr; } }
+/* sidebar-double (Operations): two same-shape panels (RISE EMEA/Americas)
+   each get their own full column - .sidebar itself becomes `display:
+   contents` so its children (not the wrapper) are the grid items. */
+.layout.sidebar-double { grid-template-columns: 3fr 1fr 1fr; max-width: 1800px; }
+.layout.sidebar-double .sidebar { display: contents; }
+@media (max-width: 1250px) { .layout.sidebar-double { grid-template-columns: 1fr; } }
+/* sidebar-single (DFPL, and any future single-panel page): one real boxed
+   sidebar stacking whatever it's given (player panel, upcoming/recent
+   lobby sections, ...) in a single wide column next to the main content. */
+.layout.sidebar-single { grid-template-columns: 1fr 480px; max-width: 1500px; }
+@media (max-width: 1000px) { .layout.sidebar-single { grid-template-columns: 1fr; } }
 main { min-width: 0; }
-/* The two RISE Series panels become direct grid items of .layout (its own
-   column each) rather than children of a boxed sidebar - `display: contents`
-   drops this wrapper from the box tree while keeping its children
-   participating in the parent grid. */
-.sidebar { display: contents; }
+.sidebar { position: sticky; top: 1rem; margin-top: 15px; display: flex; flex-direction: column; gap: 1.75rem; min-width: 0; }
+/* single-sidebar pages (DFPL) have no per-panel heading of their own at
+   the very top the way sidebar-double's RISE panels do, so nudging it
+   down further aligns it with where the main column's content (not just
+   its header) actually starts. */
+.layout.sidebar-single .sidebar { margin-top: 95px; }
 .site-nav {
   max-width: 980px; margin: 0 auto; padding: 1.1rem 0.5rem 0;
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
@@ -170,7 +186,9 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .lobby-places { margin-top: 0.4rem; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
 .lobby-place { font-weight: 600; }
 .lobby-more, .empty-inline { color: var(--text-dim); }
-.dfpl-note { font-size: 0.8rem; margin: -0.4rem 0 1rem; max-width: 65ch; }
+.dfpl-intro { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1.25rem; }
+.dfpl-intro h2 { margin-bottom: 0.5rem; }
+.dfpl-note { margin: 0; max-width: 200ch; }
 .section-rise { position: sticky; top: 1rem; margin-top: 15px; min-width: 0; margin-bottom: 0; }
 .section-rise h2 { color: var(--accent); }
 .section-dfpl h2 { color: var(--accent); }
@@ -227,7 +245,7 @@ a { color: inherit; }
     <a class="nav-link active" href="dfpl.html">DFPL</a>
   </div>
 </nav>
-<div class="layout no-sidebar">
+<div class="layout sidebar-single">
 <main>
   <header>
     <p class="eyebrow">Ops Board</p>
@@ -236,17 +254,22 @@ a { color: inherit; }
   </header>
   
     <section class="section-dfpl">
-      <h2>DFPL DFPL2026S2 standings</h2>
-      <p class="empty-inline dfpl-note">Ranked by win count - DFPL's own API doesn't expose a points/standings field (see README). Team names shown as their short code; player names are their Latin handle where one exists in the roster data, otherwise the original Chinese nickname.</p>
-      <div class="rise-grid">
-        <div class="rise-standings">
+      <div class="dfpl-intro">
+        <h2>Delta Force Pro League - 2026 SEASON2 - Standings</h2>
+        <p class="empty-inline dfpl-note">Ranked by win count - DFPL's own API doesn't expose a points/standings field (see README). Team names shown as their short code; player names are their Latin handle where one exists in the roster data, otherwise the original Chinese nickname.</p>
+      </div>
+      
     <table class="standings-table">
       <thead><tr><th>#</th><th>Team</th><th>Wins</th></tr></thead>
       <tbody><tr><td class="standings-rank">1</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/03d7b29e41a0f3cf3b7c77704c94accc.png" alt="" loading="lazy"><span>AG</span></td><td class="standings-points">17</td></tr><tr><td class="standings-rank">2</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/353bc6bbf59f1d9b390423568b95d06a.png" alt="" loading="lazy"><span>ESTAR</span></td><td class="standings-points">16</td></tr><tr><td class="standings-rank">3</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/836269bacc57cca2cb9c9c5991d2c3aa.png" alt="" loading="lazy"><span>SYG</span></td><td class="standings-points">12</td></tr><tr><td class="standings-rank">4</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1785859200000/694fccea4ce635f233dfaaa47bcd97f3.png" alt="" loading="lazy"><span>EGG</span></td><td class="standings-points">11</td></tr><tr><td class="standings-rank">5</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774022400000/28f75621e727c4e6571ffe3d3be4ad22.png" alt="" loading="lazy"><span>NOVA</span></td><td class="standings-points">11</td></tr><tr><td class="standings-rank">6</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/40c23ef39405024e24423d6165f5ebcd.png" alt="" loading="lazy"><span>IBG</span></td><td class="standings-points">10</td></tr><tr><td class="standings-rank">7</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/5ea5f5b3f9d9925a071567a63eb64883.png" alt="" loading="lazy"><span>JXG</span></td><td class="standings-points">10</td></tr><tr><td class="standings-rank">8</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/c59c7d2e318b006c55d87194187f2916.png" alt="" loading="lazy"><span>RSG</span></td><td class="standings-points">10</td></tr><tr><td class="standings-rank">9</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/6e4ff72c09ed2dbf8d393a8d1a710a2c.png" alt="" loading="lazy"><span>WBG</span></td><td class="standings-points">10</td></tr><tr><td class="standings-rank">10</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/72755893ad38d1897743388e10b16fdf.png" alt="" loading="lazy"><span>LD</span></td><td class="standings-points">8</td></tr><tr><td class="standings-rank">11</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/12fbc96df91aa904085c94d98d5cca5e.png" alt="" loading="lazy"><span>OA</span></td><td class="standings-points">7</td></tr><tr><td class="standings-rank">12</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1785859200000/b6bf0724d286557b70ede0b276713e13.png" alt="" loading="lazy"><span>WFG</span></td><td class="standings-points">7</td></tr><tr><td class="standings-rank">13</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/bac7c361896a07ad14f9fe005cdf34c4.png" alt="" loading="lazy"><span>KSG</span></td><td class="standings-points">6</td></tr><tr><td class="standings-rank">14</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/6a561722676c50acc8e5bac03d17820c.png" alt="" loading="lazy"><span>LGD</span></td><td class="standings-points">6</td></tr><tr><td class="standings-rank">15</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/64d0865d0e9273123d9dfc7e6e9358b0.png" alt="" loading="lazy"><span>SHARK</span></td><td class="standings-points">6</td></tr><tr><td class="standings-rank">16</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/bc067be672b789812c5eda0f0db786ac.png" alt="" loading="lazy"><span>BAISHA</span></td><td class="standings-points">5</td></tr><tr><td class="standings-rank">17</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/e053ed864abb995942cf6beace0952f7.png" alt="" loading="lazy"><span>BLG</span></td><td class="standings-points">5</td></tr><tr><td class="standings-rank">18</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/051b61fe67e95a1545f01a9b6340a7f9.png" alt="" loading="lazy"><span>JAG</span></td><td class="standings-points">5</td></tr><tr><td class="standings-rank">19</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774022400000/498f8c2720fae35aa48c2c2fe967faa5.png" alt="" loading="lazy"><span>JDG</span></td><td class="standings-points">5</td></tr><tr><td class="standings-rank">20</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774022400000/4c11d95579a86baa22ce668fc01067aa.png" alt="" loading="lazy"><span>QJ</span></td><td class="standings-points">5</td></tr><tr><td class="standings-rank">21</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1785859200000/f116d9c7f9b5d60ccf90a35ddfcd5d4c.png" alt="" loading="lazy"><span>YCG</span></td><td class="standings-points">5</td></tr><tr><td class="standings-rank">22</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1785859200000/10a8a43ecb1af6a52ce7912f80d2bb7d.png" alt="" loading="lazy"><span>TEC</span></td><td class="standings-points">4</td></tr><tr><td class="standings-rank">23</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/9ba4904b7ef35387e29ac08426e5d271.png" alt="" loading="lazy"><span>DRG</span></td><td class="standings-points">2</td></tr><tr><td class="standings-rank">24</td><td class="standings-team"><img class="team-logo-sm" src="https://df-pic.tmes.qq.com/cdn/1774195200000/83b3177604b4283b99a8bb9b5b7ad7c1.png" alt="" loading="lazy"><span>TES</span></td><td class="standings-points">2</td></tr></tbody>
-    </table></div>
-        <div class="rise-side"><div class="side-panel"><h3>Top players (K/D)</h3><ul class="mvp-list"><li class="mvp-row"><span class="mvp-name">Aqing</span><span class="mvp-team">ESTAR</span><span class="mvp-count">1.837 KD</span></li><li class="mvp-row"><span class="mvp-name">成成大王</span><span class="mvp-team">SYG</span><span class="mvp-count">1.826 KD</span></li><li class="mvp-row"><span class="mvp-name">duyilin</span><span class="mvp-team">JDG</span><span class="mvp-count">1.674 KD</span></li><li class="mvp-row"><span class="mvp-name">Wen7</span><span class="mvp-team">ESTAR</span><span class="mvp-count">1.627 KD</span></li><li class="mvp-row"><span class="mvp-name">无敌阿布</span><span class="mvp-team">WBG</span><span class="mvp-count">1.579 KD</span></li></ul></div></div>
-      </div>
+    </table>
     </section>
+  <footer>
+    <span>Updated Sun 23 Aug 2026, 10:49 (Paris time)</span>
+    <span>Sources: df.qq.com (DFPL)</span>
+  </footer>
+</main>
+<aside class="sidebar"><div class="side-panel"><h3>Top players (K/D)</h3><ul class="mvp-list"><li class="mvp-row"><span class="mvp-name">Aqing</span><span class="mvp-team">ESTAR</span><span class="mvp-count">1.837 KD</span></li><li class="mvp-row"><span class="mvp-name">成成大王</span><span class="mvp-team">SYG</span><span class="mvp-count">1.826 KD</span></li><li class="mvp-row"><span class="mvp-name">duyilin</span><span class="mvp-team">JDG</span><span class="mvp-count">1.674 KD</span></li><li class="mvp-row"><span class="mvp-name">Wen7</span><span class="mvp-team">ESTAR</span><span class="mvp-count">1.627 KD</span></li><li class="mvp-row"><span class="mvp-name">无敌阿布</span><span class="mvp-team">WBG</span><span class="mvp-count">1.579 KD</span></li></ul></div>
     <section class="section-upcoming">
       <h2>Upcoming lobbies</h2>
       <div class="ticket-list">
@@ -317,13 +340,7 @@ a { color: inherit; }
         <span class="badge badge-done">Final</span>
       </div>
     </article></div>
-    </section>
-  <footer>
-    <span>Updated Sun 23 Aug 2026, 10:24 (Paris time)</span>
-    <span>Sources: df.qq.com (DFPL)</span>
-  </footer>
-</main>
-
+    </section></aside>
 </div>
 </body>
 </html>
