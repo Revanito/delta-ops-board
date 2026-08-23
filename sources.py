@@ -699,6 +699,22 @@ def dfpl_schedule_title(schedule_id):
     return f"Week {m.group(1)} · Match {m.group(2)}" if m else schedule_id
 
 
+_DFPL_SEASON_ID_RE = re.compile(r"^DFPL(\d{4})S(\d+)$")
+
+
+def dfpl_season_title(season_id):
+    """Formats a DFPL season_id ("DFPL2026S2") into a display title
+    ("Delta Force Pro League - 2026 SEASON2 - Standings"). Parses whatever
+    DFPL_SEASON_ID is currently set to, so the title updates on its own
+    once that's bumped for a new season/year - falls back to the raw
+    season_id if the format ever changes shape, rather than raising."""
+    m = _DFPL_SEASON_ID_RE.match(season_id)
+    if not m:
+        return f"Delta Force Pro League - {season_id} - Standings"
+    year, season = m.groups()
+    return f"Delta Force Pro League - {year} SEASON{season} - Standings"
+
+
 def gather_dfpl_data(season_id=DFPL_SEASON_ID):
     """Full snapshot for one DFPL season. Raises on any failure - same
     contract as gather_rise_series_data."""

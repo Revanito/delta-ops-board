@@ -508,6 +508,11 @@ body {
 .layout {
   margin: 0 auto; padding: 0 0.5rem;
   display: grid; gap: 1.75rem; align-items: start;
+  /* align-items:start matters here: the grid ROW is still sized to the
+     tallest item regardless, but start keeps `.sidebar`'s own box at its
+     natural (shorter) height within that tall row instead of stretching
+     it to match - that gap is exactly the "room" position:sticky needs to
+     actually stick as `main` scrolls past it. */
 }
 .layout.no-sidebar { grid-template-columns: 1fr; max-width: 980px; }
 /* sidebar-double (Operations): two same-shape panels (RISE EMEA/Americas)
@@ -523,6 +528,11 @@ body {
 @media (max-width: 1000px) { .layout.sidebar-single { grid-template-columns: 1fr; } }
 main { min-width: 0; }
 .sidebar { position: sticky; top: 1rem; margin-top: 15px; display: flex; flex-direction: column; gap: 1.75rem; min-width: 0; }
+/* single-sidebar pages (DFPL) have no per-panel heading of their own at
+   the very top the way sidebar-double's RISE panels do, so nudging it
+   down further aligns it with where the main column's content (not just
+   its header) actually starts. */
+.layout.sidebar-single .sidebar { margin-top: 95px; }
 .site-nav {
   max-width: 980px; margin: 0 auto; padding: 1.1rem 0.5rem 0;
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
@@ -643,7 +653,9 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .lobby-places { margin-top: 0.4rem; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
 .lobby-place { font-weight: 600; }
 .lobby-more, .empty-inline { color: var(--text-dim); }
-.dfpl-note { font-size: 0.8rem; margin: -0.4rem 0 1rem; max-width: 65ch; }
+.dfpl-intro { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1.25rem; }
+.dfpl-intro h2 { margin-bottom: 0.5rem; }
+.dfpl-note { margin: 0; max-width: 200ch; }
 .section-rise { position: sticky; top: 1rem; margin-top: 15px; min-width: 0; margin-bottom: 0; }
 .section-rise h2 { color: var(--accent); }
 .section-dfpl h2 { color: var(--accent); }
@@ -852,8 +864,10 @@ def build_dfpl_html(data, generated_at):
 
         sections = f"""
     <section class="section-dfpl">
-      <h2>DFPL {e(data["season_id"])} standings</h2>
-      <p class="empty-inline dfpl-note">Ranked by win count - DFPL's own API doesn't expose a points/standings field (see README). Team names shown as their short code; player names are their Latin handle where one exists in the roster data, otherwise the original Chinese nickname.</p>
+      <div class="dfpl-intro">
+        <h2>{e(sources.dfpl_season_title(data["season_id"]))}</h2>
+        <p class="empty-inline dfpl-note">Ranked by win count - DFPL's own API doesn't expose a points/standings field (see README). Team names shown as their short code; player names are their Latin handle where one exists in the roster data, otherwise the original Chinese nickname.</p>
+      </div>
       {render_dfpl_standings_table(data["team_ranks"], team_map)}
     </section>"""
 
