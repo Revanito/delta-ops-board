@@ -640,6 +640,7 @@ a.team:hover { color: var(--accent); text-decoration: underline; }
 .dfpl-note { font-size: 0.8rem; margin: -0.4rem 0 1rem; max-width: 65ch; }
 .section-rise { position: sticky; top: 1rem; margin-top: 15px; min-width: 0; margin-bottom: 0; }
 .section-rise h2 { color: var(--accent); }
+.section-dfpl h2 { color: var(--accent); }
 .rise-grid { display: flex; flex-direction: column; gap: 1rem; }
 .standings-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .standings-table th, .standings-table td { padding: 0.5rem 0.7rem; text-align: left; font-size: 0.85rem; }
@@ -840,7 +841,7 @@ def build_dfpl_html(data, generated_at):
         )
 
         sections = f"""
-    <section class="section-rise">
+    <section class="section-dfpl">
       <h2>DFPL {e(data["season_id"])} standings</h2>
       <p class="empty-inline dfpl-note">Ranked by win count - DFPL's own API doesn't expose a points/standings field (see README). Team names shown as their short code; player names are their Latin handle where one exists in the roster data, otherwise the original Chinese nickname.</p>
       <div class="rise-grid">
