@@ -506,17 +506,23 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 .layout {
-  max-width: 1800px; margin: 0 auto; padding: 0 0.5rem;
-  display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 1.75rem; align-items: start;
+  margin: 0 auto; padding: 0 0.5rem;
+  display: grid; gap: 1.75rem; align-items: start;
 }
 .layout.no-sidebar { grid-template-columns: 1fr; max-width: 980px; }
-@media (max-width: 1250px) { .layout { grid-template-columns: 1fr; } }
+/* sidebar-double (Operations): two same-shape panels (RISE EMEA/Americas)
+   each get their own full column - .sidebar itself becomes `display:
+   contents` so its children (not the wrapper) are the grid items. */
+.layout.sidebar-double { grid-template-columns: 3fr 1fr 1fr; max-width: 1800px; }
+.layout.sidebar-double .sidebar { display: contents; }
+@media (max-width: 1250px) { .layout.sidebar-double { grid-template-columns: 1fr; } }
+/* sidebar-single (DFPL, and any future single-panel page): one real boxed
+   sidebar stacking whatever it's given (player panel, upcoming/recent
+   lobby sections, ...) in a single wide column next to the main content. */
+.layout.sidebar-single { grid-template-columns: 1fr 480px; max-width: 1500px; }
+@media (max-width: 1000px) { .layout.sidebar-single { grid-template-columns: 1fr; } }
 main { min-width: 0; }
-/* The two RISE Series panels become direct grid items of .layout (its own
-   column each) rather than children of a boxed sidebar - `display: contents`
-   drops this wrapper from the box tree while keeping its children
-   participating in the parent grid. */
-.sidebar { display: contents; }
+.sidebar { position: sticky; top: 1rem; margin-top: 15px; display: flex; flex-direction: column; gap: 1.75rem; min-width: 0; }
 .site-nav {
   max-width: 980px; margin: 0 auto; padding: 1.1rem 0.5rem 0;
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
@@ -700,9 +706,12 @@ def render_nav(active):
 </nav>"""
 
 
-def build_page(active, title, eyebrow, subtitle, sections, sources_line, generated_at, sidebar_html=None):
+def build_page(active, title, eyebrow, subtitle, sections, sources_line, generated_at, sidebar_html=None, sidebar_mode="double"):
     generated_str = generated_at.astimezone(LOCAL_TZ).strftime("%a %d %b %Y, %H:%M (Paris time)")
-    layout_class = "layout" if sidebar_html else "layout no-sidebar"
+    if sidebar_html:
+        layout_class = "layout sidebar-double" if sidebar_mode == "double" else "layout sidebar-single"
+    else:
+        layout_class = "layout no-sidebar"
     sidebar = f'<aside class="sidebar">{sidebar_html}</aside>' if sidebar_html else ""
     return f"""<!doctype html>
 <html lang="en">
@@ -822,11 +831,12 @@ def build_operations_html(matches, rise_data_by_region, generated_at, rewards=No
         "operations", "Delta Force · Operations", "Ops Board",
         "RISE Series standings and scene-wide results for the Operations track (extraction-shooter, lobby/points format), pulled from Liquipedia and TiMi's own RISE Series backend.",
         sections, "Liquipedia, playdeltaforce.com (RISE Series + drops calendar), twitchdrops.app", generated_at,
-        sidebar_html=sidebar_html,
+        sidebar_html=sidebar_html, sidebar_mode="double",
     )
 
 
 def build_dfpl_html(data, generated_at):
+    sidebar_html = None
     if not data:
         sections = '<p class="empty">DFPL data unavailable.</p>'
     else:
@@ -844,18 +854,16 @@ def build_dfpl_html(data, generated_at):
     <section class="section-dfpl">
       <h2>DFPL {e(data["season_id"])} standings</h2>
       <p class="empty-inline dfpl-note">Ranked by win count - DFPL's own API doesn't expose a points/standings field (see README). Team names shown as their short code; player names are their Latin handle where one exists in the roster data, otherwise the original Chinese nickname.</p>
-      <div class="rise-grid">
-        <div class="rise-standings">{render_dfpl_standings_table(data["team_ranks"], team_map)}</div>
-        <div class="rise-side">{render_dfpl_player_panel(data["player_ranks"], team_map)}</div>
-      </div>
+      {render_dfpl_standings_table(data["team_ranks"], team_map)}
     </section>"""
 
+        sidebar_html = render_dfpl_player_panel(data["player_ranks"], team_map)
         if upcoming:
-            sections += render_section(
+            sidebar_html += render_section(
                 "Upcoming lobbies", [render_dfpl_schedule_card(s, team_map) for s in upcoming[:RISE_LOBBIES_SHOWN]],
                 "upcoming", "",
             )
-        sections += render_section(
+        sidebar_html += render_section(
             "Recent lobbies", [render_dfpl_schedule_card(s, team_map) for s in finished[:RISE_LOBBIES_SHOWN]],
             "completed", "No results yet.",
         )
@@ -864,6 +872,7 @@ def build_dfpl_html(data, generated_at):
         "dfpl", "Delta Force · DFPL", "Ops Board",
         "DFPL (烽火职业联赛) team and player stats for China's domestic Operations-mode league, pulled from Tencent's own DFPL backend.",
         sections, "df.qq.com (DFPL)", generated_at,
+        sidebar_html=sidebar_html, sidebar_mode="single",
     )
 
 
